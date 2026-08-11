@@ -1,40 +1,49 @@
 import logging
 
 class CustomLogger:
-    """A custom logger for application logging."
-
-    def __init__(self, name: str, level: int = logging.INFO) -> None:
-        """Initialize the logger with a name and level."
-        self.logger: logging.Logger = logging.getLogger(name)
-        self.logger.setLevel(level)
-
-        # Create a console handler and set level to debug
-        ch: logging.StreamHandler = logging.StreamHandler()
-        ch.setLevel(level)
-
-        # Create a formatter and add it to the handler
-        formatter: logging.Formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    """
+    A custom logger for handling log messages in a standardized way.
+    """
+    def __init__(self, module_name: str) -> None:
+        """
+        Initializes the logger with a specified module name.
+        """
+        self.logger = logging.getLogger(module_name)
+        self.logger.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         ch.setFormatter(formatter)
-
-        # Add the handler to the logger
         self.logger.addHandler(ch)
 
     def debug(self, message: str) -> None:
-        """Log a debug message."
+        """
+        Logs a debug message.
+        """
         self.logger.debug(message)
 
     def info(self, message: str) -> None:
-        """Log an info message."
+        """
+        Logs an info message.
+        """
         self.logger.info(message)
 
     def warning(self, message: str) -> None:
-        """Log a warning message."
+        """
+        Logs a warning message.
+        """
         self.logger.warning(message)
 
     def error(self, message: str) -> None:
-        """Log an error message."
+        """
+        Logs an error message.
+        """
         self.logger.error(message)
 
     def critical(self, message: str) -> None:
-        """Log a critical message."
+        """
+        Logs a critical message.
+        """
         self.logger.critical(message)
+
+logger = CustomLogger(__name__)
