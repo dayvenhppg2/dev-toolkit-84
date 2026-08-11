@@ -1,17 +1,40 @@
 import logging
-from logging.handlers import RotatingFileHandler
 
-def setup_logger(log_file='app.log', max_bytes=1024 * 1024 * 5, backup_count=3):
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+class CustomLogger:
+    """A custom logger for application logging."
 
-    handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
+    def __init__(self, name: str, level: int = logging.INFO) -> None:
+        """Initialize the logger with a name and level."
+        self.logger: logging.Logger = logging.getLogger(name)
+        self.logger.setLevel(level)
 
-    logger.addHandler(handler)
-    return logger
+        # Create a console handler and set level to debug
+        ch: logging.StreamHandler = logging.StreamHandler()
+        ch.setLevel(level)
 
-if __name__ == '__main__':
-    log = setup_logger()
-    log.info('Logger setup complete. Ready to log!')
+        # Create a formatter and add it to the handler
+        formatter: logging.Formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        ch.setFormatter(formatter)
+
+        # Add the handler to the logger
+        self.logger.addHandler(ch)
+
+    def debug(self, message: str) -> None:
+        """Log a debug message."
+        self.logger.debug(message)
+
+    def info(self, message: str) -> None:
+        """Log an info message."
+        self.logger.info(message)
+
+    def warning(self, message: str) -> None:
+        """Log a warning message."
+        self.logger.warning(message)
+
+    def error(self, message: str) -> None:
+        """Log an error message."
+        self.logger.error(message)
+
+    def critical(self, message: str) -> None:
+        """Log a critical message."
+        self.logger.critical(message)
