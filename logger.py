@@ -1,49 +1,32 @@
 import logging
 
-class CustomLogger:
-    """
-    A custom logger for handling log messages in a standardized way.
-    """
-    def __init__(self, module_name: str) -> None:
-        """
-        Initializes the logger with a specified module name.
-        """
-        self.logger = logging.getLogger(module_name)
-        self.logger.setLevel(logging.DEBUG)
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
+class Logger:
+    def __init__(self, name, level=logging.INFO):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(level)
+        handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
-    def debug(self, message: str) -> None:
-        """
-        Logs a debug message.
-        """
-        self.logger.debug(message)
-
-    def info(self, message: str) -> None:
-        """
-        Logs an info message.
-        """
+    def info(self, message):
         self.logger.info(message)
 
-    def warning(self, message: str) -> None:
-        """
-        Logs a warning message.
-        """
+    def warning(self, message):
         self.logger.warning(message)
 
-    def error(self, message: str) -> None:
-        """
-        Logs an error message.
-        """
+    def error(self, message):
         self.logger.error(message)
 
-    def critical(self, message: str) -> None:
-        """
-        Logs a critical message.
-        """
+    def debug(self, message):
+        self.logger.debug(message)
+
+    def critical(self, message):
         self.logger.critical(message)
 
-logger = CustomLogger(__name__)
+logger = Logger(__name__)
+
+# Example usage
+if __name__ == '__main__':
+    logger.info('This is an info message.')
+    logger.error('This is an error message.')
