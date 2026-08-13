@@ -1,27 +1,26 @@
-import requests
-import time
+import json
+import re
 
-class NetworkError(Exception):
-    pass
+class CryptoProcessor:
+    def __init__(self, data):
+        self.data = data
 
-def retry_request(url, retries=3, delay=1, backoff=2):
-    attempt = 0
-    while attempt < retries:
-        try:
-            response = requests.get(url)
-            response.raise_for_status()
-            return response.json()  # assuming response is JSON
-        except requests.RequestException as e:
-            attempt += 1
-            if attempt == retries:
-                raise NetworkError(f'Failed after {retries} attempts: {e}')
-            time.sleep(delay)
-            delay *= backoff  # increase the delay exponentially
+    def validate_input(self):
+        pattern = re.compile("^[A-Za-z0-9 ]+$")
+        return pattern.match(self.data) is not None
+
+    def process_data(self):
+        if not self.validate_input():
+            raise ValueError("Invalid input data.")
+        # Process the data
+        result = self.data.upper()  # Example processing
+        return result
 
 if __name__ == '__main__':
-    url = 'https://api.example.com/data'
+    user_input = 'ValidInput123'
+    processor = CryptoProcessor(user_input)
     try:
-        data = retry_request(url)
-        print(data)
-    except NetworkError as ne:
-        print(ne)
+        output = processor.process_data()
+        print(json.dumps({'result': output}))
+    except ValueError as e:
+        print(json.dumps({'error': str(e)}))
