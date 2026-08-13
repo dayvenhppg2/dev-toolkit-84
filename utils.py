@@ -1,32 +1,30 @@
-import time
-import hashlib
 import json
+import requests
 
-class CryptoUtils:
-    @staticmethod
-    def hash_data(data):
-        return hashlib.sha256(data.encode('utf-8')).hexdigest()
+class CryptoAPIError(Exception):
+    pass
 
-    @staticmethod
-    def measure_execution_time(func):
-        def wrapper(*args, **kwargs):
-            start_time = time.perf_counter()
-            result = func(*args, **kwargs)
-            end_time = time.perf_counter()
-            print(f'Execution Time: {end_time - start_time} seconds')
-            return result
-        return wrapper
+def fetch_crypto_data(symbol):
+    try:
+        response = requests.get(f'https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usd')
+        response.raise_for_status()
+        data = response.json()
+        if symbol not in data:
+            raise CryptoAPIError(f'Data for {symbol} not found')
+        return data[symbol]['usd']
+    except requests.exceptions.HTTPError as http_err:
+        raise CryptoAPIError(f'HTTP error occurred: {http_err}')
+    except requests.exceptions.RequestException as req_err:
+        raise CryptoAPIError(f'Request error occurred: {req_err}')
+    except json.JSONDecodeError:
+        raise CryptoAPIError('Error decoding JSON response')
+    except Exception as e:
+        raise CryptoAPIError(f'An unexpected error occurred: {e}')
 
-    @staticmethod
-    def serialize_to_json(data):
-        return json.dumps(data, separators=(',', ':'))
-
-    @staticmethod
-    @measure_execution_time
-    def calculate_historical_average(prices):
-        return sum(prices) / len(prices) if prices else 0
-
-    @staticmethod
-    def format_decimal(value, decimal_places=8):
-        return f'{{:.{decimal_places}f}}'.format(value)
-
+if __name__ == '__main__':
+    symbol = 'bitcoin'
+    try:
+        price = fetch_crypto_data(symbol)
+        print(f'The price of {symbol} is ${price}')
+    except CryptoAPIError as e:
+        print(e)
