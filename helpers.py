@@ -1,28 +1,28 @@
-import hashlib
 import json
 import requests
+from datetime import datetime, timedelta
 
-def generate_hash(data):
-    serialized_data = json.dumps(data, sort_keys=True).encode('utf-8')
-    return hashlib.sha256(serialized_data).hexdigest()
+class CryptoDataHandler:
+    API_URL = 'https://api.coingecko.com/api/v3'
 
-
-def fetch_data(url):
-    try:
-        response = requests.get(url)
+    @staticmethod
+    def fetch_price(crypto_id: str) -> dict:
+        response = requests.get(f'{CryptoDataHandler.API_URL}/simple/price?ids={crypto_id}&vs_currencies=usd')
         response.raise_for_status()
         return response.json()
-    except requests.RequestException as e:
-        print(f'Error fetching data: {e}')
-        return None
 
+    @staticmethod
+    def historical_data(crypto_id: str, days: int) -> list:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        response = requests.get(f'{CryptoDataHandler.API_URL}/coins/{crypto_id}/market_chart/range?vs_currency=usd&from={int(start_date.timestamp())}&to={int(end_date.timestamp())}')
+        response.raise_for_status()
+        return response.json()['prices']
 
-def validate_signature(data, provided_signature, secret):
-    hash = generate_hash(data)
-    expected_signature = hashlib.sha256((hash + secret).encode('utf-8')).hexdigest()
-    return expected_signature == provided_signature
+    @staticmethod
+    def price_to_json(price_data: dict) -> str:
+        return json.dumps(price_data, indent=4)
 
-
-def format_timestamp(timestamp):
-    from datetime import datetime
-    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+    @staticmethod
+    def historical_to_json(historical_data: list) -> str:
+        return json.dumps(historical_data, indent=4)
