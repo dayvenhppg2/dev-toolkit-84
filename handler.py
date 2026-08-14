@@ -1,32 +1,45 @@
 import json
+import re
 
 class InputError(Exception):
     pass
 
-class DataHandler:
-    def __init__(self, data):
-        self.data = data
+class CryptoHandler:
+    def __init__(self):
+        self.valid_symbols = {"BTC", "ETH", "LTC"}
+        self.transactions = []
 
-    def validate_input(self):
-        if not isinstance(self.data, dict):
-            raise InputError("Input must be a dictionary")
-        if "name" not in self.data or "age" not in self.data:
-            raise InputError("Required fields: name and age")
-        if not isinstance(self.data["name"], str):
-            raise InputError("Name must be a string")
-        if not isinstance(self.data["age"], int) or self.data["age"] <= 0:
-            raise InputError("Age must be a positive integer")
+    def is_valid_symbol(self, symbol):
+        if symbol not in self.valid_symbols:
+            raise InputError(f"Invalid cryptocurrency symbol: {symbol}")
 
-    def process(self):
-        self.validate_input()
-        processed_data = json.dumps(self.data)
-        return processed_data
+    def is_valid_amount(self, amount):
+        if not isinstance(amount, (int, float)) or amount <= 0:
+            raise InputError(f"Invalid amount: {amount}")
 
+    def process_transaction(self, transaction):
+        self.is_valid_symbol(transaction['symbol'])
+        self.is_valid_amount(transaction['amount'])
+        self.transactions.append(transaction)
+        return json.dumps({"status": "success", "transaction": transaction})
+
+    def main_loop(self, transactions):
+        results = []
+        for transaction in transactions:
+            try:
+                result = self.process_transaction(transaction)
+                results.append(result)
+            except InputError as e:
+                results.append(json.dumps({"error": str(e)}))
+        return results
+
+# Example usage
 if __name__ == '__main__':
-    user_data = {"name": "Alice", "age": 30}  
-    handler = DataHandler(user_data)
-    try:
-        result = handler.process()
-        print(result)
-    except InputError as e:
-        print(f"Input Error: {str(e)}")
+    handler = CryptoHandler()
+    sample_transactions = [
+        {"symbol": "BTC", "amount": 0.5},
+        {"symbol": "ETH", "amount": -1},  # Invalid amount
+        {"symbol": "XRP", "amount": 10},  # Invalid symbol
+    ]
+    response = handler.main_loop(sample_transactions)
+    print(response)
