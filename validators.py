@@ -1,39 +1,28 @@
 import re
+from hashlib import sha256
 
 def validate_address(address: str) -> bool:
-    regex = r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$'
-    return bool(re.match(regex, address))
+    pattern = r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$'
+    return bool(re.match(pattern, address))
 
 
-def validate_amount(amount: float) -> bool:
-    return amount > 0
+def checksum(address: str) -> str:
+    return sha256(address.encode()).hexdigest()[:8]
 
 
-def validate_transaction(transaction: dict) -> bool:
-    if 'address' not in transaction or 'amount' not in transaction:
-        return False
-    return validate_address(transaction['address']) and validate_amount(transaction['amount'])
+def is_valid_transaction(tx: dict) -> bool:
+    required_keys = {'from', 'to', 'amount', 'fee', 'nonce'}
+    if required_keys.issubset(tx.keys()):
+        return validate_address(tx['from']) and validate_address(tx['to'])
+    return False
 
 
-def validate_inputs(transactions: list) -> list:
-    return [validate_transaction(tx) for tx in transactions]
+def batch_validate_addresses(addresses: list) -> dict:
+    results = {address: validate_address(address) for address in addresses}
+    return results
 
 
-def main_loop(transactions):
-    valid_transactions = validate_inputs(transactions)
-    for is_valid in valid_transactions:
-        if not is_valid:
-            print('Invalid transaction found, skipping...')
-            continue
-        # Process valid transaction here
-        print('Processing valid transaction')
-
-
-# Example usage:
-if __name__ == '__main__':
-    example_transactions = [
-        {'address': '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', 'amount': 0.5},
-        {'address': 'invalid_address', 'amount': 0.1},
-        {'address': '1BvBMSEYstWetqTFn5Au4m4gfDz7X9s6oN', 'amount': -2},
-    ]
-    main_loop(example_transactions)
+def validate_and_process_transactions(transactions: list) -> list:
+    valid_transactions = 
+        [tx for tx in transactions if is_valid_transaction(tx)]
+    return valid_transactions
