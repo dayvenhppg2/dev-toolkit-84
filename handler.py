@@ -1,45 +1,33 @@
 import json
 import re
 
-class InputError(Exception):
-    pass
+class InputValidator:
+    @staticmethod
+    def validate_address(address):
+        if not re.match(r'^[a-fA-F0-9]{42}$', address):
+            raise ValueError('Invalid address format.')
+
+    @staticmethod
+    def validate_amount(amount):
+        if amount <= 0:
+            raise ValueError('Amount must be greater than zero.')
 
 class CryptoHandler:
-    def __init__(self):
-        self.valid_symbols = {"BTC", "ETH", "LTC"}
-        self.transactions = []
+    def __init__(self, balance):
+        self.balance = balance
 
-    def is_valid_symbol(self, symbol):
-        if symbol not in self.valid_symbols:
-            raise InputError(f"Invalid cryptocurrency symbol: {symbol}")
-
-    def is_valid_amount(self, amount):
-        if not isinstance(amount, (int, float)) or amount <= 0:
-            raise InputError(f"Invalid amount: {amount}")
-
-    def process_transaction(self, transaction):
-        self.is_valid_symbol(transaction['symbol'])
-        self.is_valid_amount(transaction['amount'])
-        self.transactions.append(transaction)
-        return json.dumps({"status": "success", "transaction": transaction})
-
-    def main_loop(self, transactions):
-        results = []
-        for transaction in transactions:
-            try:
-                result = self.process_transaction(transaction)
-                results.append(result)
-            except InputError as e:
-                results.append(json.dumps({"error": str(e)}))
-        return results
+    def process_transaction(self, address, amount):
+        InputValidator.validate_address(address)
+        InputValidator.validate_amount(amount)
+        if amount > self.balance:
+            raise ValueError('Insufficient balance.')
+        self.balance -= amount
+        return json.dumps({'status': 'success', 'balance': self.balance})
 
 # Example usage
 if __name__ == '__main__':
-    handler = CryptoHandler()
-    sample_transactions = [
-        {"symbol": "BTC", "amount": 0.5},
-        {"symbol": "ETH", "amount": -1},  # Invalid amount
-        {"symbol": "XRP", "amount": 10},  # Invalid symbol
-    ]
-    response = handler.main_loop(sample_transactions)
-    print(response)
+    handler = CryptoHandler(balance=100)
+    try:
+        print(handler.process_transaction('0x32Be343B94298F2C144Bd6000fE843A0eA0cD34', 10))
+    except ValueError as e:
+        print(f'Error: {e}')
