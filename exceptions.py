@@ -1,28 +1,44 @@
-class CustomError(Exception):
-    """Base class for other exceptions."""
-    pass
-
-class ValidationError(CustomError):
-    """Raised when validation fails."""
-    def __init__(self, message: str) -> None:
+class ValidationError(Exception):
+    """Custom exception for validation errors."""
+    def __init__(self, message):
         super().__init__(message)
         self.message = message
 
-class DatabaseError(CustomError):
-    """Raised when there's a database error."""
-    def __init__(self, message: str, code: int) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
 
-    def __str__(self) -> str:
-        return f"DatabaseError {self.code}: {self.message}"
+def validate_input(data):
+    if not isinstance(data, dict):
+        raise ValidationError('Input must be a dictionary.')
+    if 'amount' not in data:
+        raise ValidationError('Missing required field: amount')
+    if not isinstance(data['amount'], (int, float)):
+        raise ValidationError('Amount must be a number.')
+    if data['amount'] <= 0:
+        raise ValidationError('Amount must be greater than zero.')
 
-class NotFoundError(CustomError):
-    """Raised when a resource is not found."""
-    def __init__(self, resource: str) -> None:
-        self.resource = resource
-        super().__init__(f'{resource} not found')
+    if 'currency' not in data:
+        raise ValidationError('Missing required field: currency')
+    if not isinstance(data['currency'], str):
+        raise ValidationError('Currency must be a string.')
 
-    def __str__(self) -> str:
-        return f'{self.resource} was not found.'
+    # Add more validation rules as needed
+
+
+def process_transaction(data):
+    try:
+        validate_input(data)
+        # Proceed with processing the transaction
+        print('Processing transaction:', data)
+    except ValidationError as e:
+        print('Validation error:', e.message)
+
+
+# Example main processing loop
+if __name__ == '__main__':
+    transactions = [
+        {'amount': 100, 'currency': 'USD'},
+        {'amount': -50, 'currency': 'EUR'},
+        {'currency': 'BTC'},
+        'invalid input',
+    ]
+    for tx in transactions:
+        process_transaction(tx)
