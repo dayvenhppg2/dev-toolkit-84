@@ -2,25 +2,29 @@ import json
 import os
 
 class ConfigLoader:
-    def __init__(self, default_config_path, user_config_path):
-        self.default_config = self.load_config(default_config_path)
-        self.user_config = self.load_config(user_config_path)
-        self.config = self.merge_configs(self.default_config, self.user_config)
+    def __init__(self, default_config: dict):
+        self.default_config = default_config
+        self.config = self.load_config()
 
-    def load_config(self, path):
-        if not os.path.isfile(path):
-            return {}
-        with open(path, 'r') as file:
-            return json.load(file)
-
-    def merge_configs(self, default, user):
-        merged = default.copy()
-        merged.update(user)
-        return merged
+    def load_config(self):
+        config_path = os.getenv('CONFIG_PATH', 'config.json')
+        if os.path.isfile(config_path):
+            with open(config_path, 'r') as file:
+                user_config = json.load(file)
+            return {**self.default_config, **user_config}
+        return self.default_config
 
     def get(self, key, default=None):
         return self.config.get(key, default)
 
-# Usage:
-# loader = ConfigLoader('default_config.json', 'user_config.json')
-# api_key = loader.get('API_KEY', 'default_key')
+# Usage example
+def main():
+    default_settings = {
+        'api_key': 'your_default_api_key',
+        'timeout': 30,
+    }
+    config_loader = ConfigLoader(default_settings)
+    print(config_loader.get('api_key'))
+
+if __name__ == '__main__':
+    main()
