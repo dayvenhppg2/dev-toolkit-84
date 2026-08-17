@@ -1,33 +1,34 @@
 import json
-import re
-
-class InputValidator:
-    @staticmethod
-    def validate_address(address):
-        if not re.match(r'^[a-fA-F0-9]{42}$', address):
-            raise ValueError('Invalid address format.')
-
-    @staticmethod
-    def validate_amount(amount):
-        if amount <= 0:
-            raise ValueError('Amount must be greater than zero.')
+import requests
+from requests.exceptions import RequestException
 
 class CryptoHandler:
-    def __init__(self, balance):
-        self.balance = balance
+    def __init__(self, api_url):
+        self.api_url = api_url
 
-    def process_transaction(self, address, amount):
-        InputValidator.validate_address(address)
-        InputValidator.validate_amount(amount)
-        if amount > self.balance:
-            raise ValueError('Insufficient balance.')
-        self.balance -= amount
-        return json.dumps({'status': 'success', 'balance': self.balance})
+    def fetch_data(self, endpoint):
+        url = f'{self.api_url}/{endpoint}'
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            return response.json()
+        except RequestException as e:
+            return self.handle_error(e, url)
+        except json.JSONDecodeError:
+            return {'error': 'Invalid JSON response from server'}
 
-# Example usage
+    def handle_error(self, error, url):
+        if isinstance(error, requests.ConnectionError):
+            return {'error': 'Network problem occurred', 'url': url}
+        elif isinstance(error, requests.Timeout):
+            return {'error': 'Request timed out', 'url': url}
+        elif isinstance(error, requests.HTTPError):
+            return {'error': f'HTTP error occurred: {error}', 'url': url}
+        else:
+            return {'error': 'An unexpected error occurred', 'details': str(error)}
+
+# Example usage:
 if __name__ == '__main__':
-    handler = CryptoHandler(balance=100)
-    try:
-        print(handler.process_transaction('0x32Be343B94298F2C144Bd6000fE843A0eA0cD34', 10))
-    except ValueError as e:
-        print(f'Error: {e}')
+    handler = CryptoHandler('https://api.example.com')
+    data = handler.fetch_data('crypto_prices')
+    print(data)
