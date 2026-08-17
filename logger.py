@@ -1,27 +1,41 @@
 import logging
-import logging.handlers
 import os
 
-LOG_DIRECTORY = 'logs'
-LOG_FILE = 'app.log'
-MAX_BYTES = 10 * 1024 * 1024  # 10 MB
-BACKUP_COUNT = 5
+class Logger:
+    def __init__(self, name, level=logging.INFO):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(level)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.propagate = False
 
-if not os.path.exists(LOG_DIRECTORY):
-    os.makedirs(LOG_DIRECTORY)
+    def debug(self, message):
+        self.logger.debug(message)
 
-logger = logging.getLogger('crypto_toolkit')
-logger.setLevel(logging.DEBUG)
+    def info(self, message):
+        self.logger.info(message)
 
-file_handler = logging.handlers.RotatingFileHandler(
-    os.path.join(LOG_DIRECTORY, LOG_FILE),
-    maxBytes=MAX_BYTES,
-    backupCount=BACKUP_COUNT
-)  
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    def warning(self, message):
+        self.logger.warning(message)
 
-logger.addHandler(file_handler)
+    def error(self, message):
+        self.logger.error(message)
 
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
-logger.addHandler(console_handler)
+    def critical(self, message):
+        self.logger.critical(message)
+
+    def set_log_level(self, level):
+        self.logger.setLevel(level)
+
+    @staticmethod
+    def log_file_exists(file_path):
+        return os.path.isfile(file_path)
+
+    def log_to_file(self, message, file_path):
+        if self.log_file_exists(file_path):
+            with open(file_path, 'a') as f:
+                f.write(f'{message}\n')
+        else:
+            self.logger.error('Log file does not exist')
