@@ -1,41 +1,21 @@
 import logging
-import os
+from logging.handlers import RotatingFileHandler
 
-class Logger:
-    def __init__(self, name, level=logging.INFO):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(level)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.propagate = False
+def setup_logger(log_file='app.log', max_bytes=5 * 1024 * 1024, backup_count=3):
+    logger = logging.getLogger('CryptoLogger')
+    logger.setLevel(logging.DEBUG)
 
-    def debug(self, message):
-        self.logger.debug(message)
+    handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
-    def info(self, message):
-        self.logger.info(message)
+    logger.addHandler(handler)
+    return logger
 
-    def warning(self, message):
-        self.logger.warning(message)
-
-    def error(self, message):
-        self.logger.error(message)
-
-    def critical(self, message):
-        self.logger.critical(message)
-
-    def set_log_level(self, level):
-        self.logger.setLevel(level)
-
-    @staticmethod
-    def log_file_exists(file_path):
-        return os.path.isfile(file_path)
-
-    def log_to_file(self, message, file_path):
-        if self.log_file_exists(file_path):
-            with open(file_path, 'a') as f:
-                f.write(f'{message}\n')
-        else:
-            self.logger.error('Log file does not exist')
+# Example usage
+if __name__ == '__main__':
+    logger = setup_logger()
+    logger.info('Logger is set up successfully.')
+    logger.warning('This is a warning message.')
+    logger.error('This is an error message.')
+    for i in range(100):
+        logger.debug(f'Debugging message {i}')
