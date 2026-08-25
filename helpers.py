@@ -1,33 +1,59 @@
-import requests
-import json
-from datetime import datetime, timedelta
+import hashlib
+import os
+import binascii
 
-class CryptoDataHandler:
-    def __init__(self, api_url):
-        self.api_url = api_url
+def generate_private_key():
+    return os.urandom(32)
 
-    def fetch_data(self, symbol, days=1):
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        response = requests.get(f'{self.api_url}/historical/{symbol}', params={'start': start_date.isoformat(), 'end': end_date.isoformat()})
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception('Error fetching data: ' + response.text)
+def double_sha256(data):
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
 
-    def parse_data(self, data):
-        parsed_data = []
-        for entry in data['prices']:
-            timestamp, price = entry
-            parsed_data.append({'date': self._format_date(timestamp), 'price': price})
-        return parsed_data
+def multi_round_hash(data, rounds=2):
+    result = data
+    for i in range(rounds):
+        result = hashlib.sha256(result).digest()
+        if i % 2 == 0:
+            result = hashlib.sha256(result + b'unusual_crypto_mix').digest()
+    return result
 
-    def _format_date(self, timestamp):
-        return datetime.fromtimestamp(timestamp / 1000).strftime('%Y-%m-%d')
+def base58_encode(data):
+    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    num = int.from_bytes(data, 'big')
+    s = ''
+    while num:
+        num, r = divmod(num, 58)
+        s = alphabet[r] + s
+    pad = len(data) - len(data.lstrip(b'\x00'))
+    return alphabet[0] * pad + s
 
-    def save_to_file(self, data, filename):
-        with open(filename, 'w') as file:
-            json.dump(data, file)
+def base58_decode(s):
+    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    num = 0
+    for c in s:
+        num = num * 58 + alphabet.index(c)
+    byte_len = (num.bit_length() + 7) // 8 or 1
+    decoded = num.to_bytes(byte_len, 'big')
+    pad = len(s) - len(s.lstrip(alphabet[0]))
+    return b'\x00' * pad + decoded
 
-handler = CryptoDataHandler('https://api.coingecko.com/api/v3')
-# an example use-case could be executed in another part of the application
+def create_address(key_hash):
+    if len(key_hash) != 20:
+        raise ValueError('Key hash must be 20 bytes')
+    version = b'\x00'
+    payload = version + key_hash
+    checksum = double_sha256(payload)[:4]
+    return base58_encode(payload + checksum)
+
+def validate_address(addr):
+    try:
+        decoded = base58_decode(addr)
+        if len(decoded) < 5:
+            return False
+        payload = decoded[:-4]
+        checksum = decoded[-4:]
+        return checksum == double_sha256(payload)[:4]
+    except Exception:
+        return False
+
+def get_transaction_id(tx_bytes):
+    return binascii.hexlify(double_sha256(tx_bytes)).decode()
