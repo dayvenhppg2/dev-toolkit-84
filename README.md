@@ -1,48 +1,34 @@
 # dev-toolkit-84
 
-A versatile toolkit designed to streamline development processes and enhance productivity in Python programming. This project aggregates various utilities to simplify common tasks, allowing developers to focus on building robust applications.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+dev-toolkit-84 is a Python toolkit that assists developers in cryptocurrency projects by offering streamlined functions for wallet operations and blockchain queries. It supports multiple chains and helps with common development tasks like key generation and transaction preparation.
 
 ## Features
-
-- **Automated Code Formatting**: Integrate with popular formatting tools like Black and Flake8 to maintain code quality effortlessly.
-- **Environment Management**: Simplify the creation and management of virtual environments with easy-to-use commands.
-- **Dependency Tracking**: Automatically analyze and list project dependencies, making it easy to manage requirements.
-- **Version Control Integration**: Smooth integration with Git to streamline commits and manage branching strategies.
+- HD wallet generation and key derivation for Bitcoin, Ethereum, and Solana
+- Transaction building and signing with EIP-1559 fee estimation for EVM chains
+- Unified queries for account balances, token holdings, and recent transactions
+- Cryptographic helpers for message signing and address validation
 
 ## Installation
-
-To set up the `dev-toolkit-84`, ensure you have Python 3.6 or higher installed. You can install the toolkit using `pip`:
-
-```bash
-pip install dev-toolkit-84
-```
-
-Or, you can clone the repository directly and install it from source:
 
 ```bash
 git clone https://github.com/Developer/dev-toolkit-84.git
 cd dev-toolkit-84
-pip install .
+pip install -e .
 ```
 
-## Basic Usage Example
+## Usage
 
-Once installed, you can utilize the toolkit's commands directly from your terminal. Here's a brief example of how to format your code and manage dependencies:
+```python
+from dev_toolkit import generate_wallet, get_balance, estimate_gas
 
-1. **Format Code**:
-   ```bash
-   dev-toolkit format your_script.py
-   ```
+wallet = generate_wallet(chain="ethereum")
+print(wallet.address)
 
-2. **Manage Dependencies**:
-   ```bash
-   dev-toolkit dependencies list
-   ```
+balance = get_balance(wallet.address, chain="ethereum")
+print(f"Balance: {balance}")
 
-The commands above help ensure your code meets the desired standards and that your project's dependencies are in check, improving overall maintainability.
-
-## License
-
-![MIT License](https://img.shields.io/badge/license-MIT-brightgreen)
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+gas = estimate_gas(chain="ethereum", to="0x742d35Cc6634C0532925a3b844Bc454e4438f44e", value=0.05)
+print(f"Estimated gas: {gas}")
+```
