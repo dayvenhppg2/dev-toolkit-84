@@ -1,28 +1,66 @@
+import hashlib
 import json
-import requests
+from typing import List, Dict, Any, Optional
 
 class CryptoProcessor:
-    def __init__(self, api_url):
-        self.api_url = api_url
+    def __init__(self) -> None:
+        self.processed = 0
+        self.errors = []
 
-    def fetch_data(self, crypto_symbol):
-        response = requests.get(f'{self.api_url}/{crypto_symbol}')
-        if response.status_code != 200:
-            raise ValueError('Error fetching data')
-        return response.json()
+    def validate_private_key(self, key: str) -> bool:
+        if not isinstance(key, str):
+            return False
+        if len(key) != 64:
+            return False
+        try:
+            int(key, 16)
+            return key != "0" * 64
+        except ValueError:
+            return False
 
-    def process_data(self, data):
-        price = data.get('price')
-        volume = data.get('volume')
-        if price is None or volume is None:
-            raise ValueError('Invalid data structure')
-        return {'price': price, 'volume': volume}
+    def process_transaction(self, tx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            if not tx or not isinstance(tx, dict):
+                raise ValueError("Transaction data must be a non-empty dict")
+            amount = tx.get("amount")
+            if amount is None or not isinstance(amount, (int, float)) or amount <= 0:
+                raise ValueError("Amount must be positive number")
+            address = tx.get("address", "")
+            if not isinstance(address, str) or len(address) < 26:
+                raise ValueError("Invalid crypto address format")
+            priv_key = tx.get("private_key", "")
+            if not self.validate_private_key(priv_key):
+                raise ValueError("Invalid or zero private key")
+            tx_str = json.dumps(tx, sort_keys=True)
+            tx_id = hashlib.sha256(tx_str.encode()).hexdigest()
+            self.processed += 1
+            return {"tx_id": tx_id, "amount": amount, "address": address[:10] + "..."}
 
-    def run(self, crypto_symbol):
-        raw_data = self.fetch_data(crypto_symbol)
-        return self.process_data(raw_data)
+        except ValueError as ve:
+            self.errors.append(f"Validation error: {ve}")
+            return None
+        except TypeError as te:
+            self.errors.append(f"Type error: {te}")
+            return None
+        except Exception as e:
+            self.errors.append(f"Unexpected error: {e}")
+            return None
 
-if __name__ == '__main__':
-    processor = CryptoProcessor(api_url='https://api.example.com/crypto')
-    result = processor.run('BTC')
-    print(json.dumps(result, indent=4))
+    def process_batch(self, transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        results: List[Dict[str, Any]] = []
+        for i, tx in enumerate(transactions):
+            try:
+                result = self.process_transaction(tx)
+                if result:
+                    results.append(result)
+                else:
+                    results.append({"index": i, "status": "failed"})
+            except Exception as e:
+                self.errors.append(f"Batch processing failed at {i}: {e}")
+                results.append({"index": i, "status": "error"})
+        return {
+            "results": results,
+            "processed_count": self.processed,
+            "error_count": len(self.errors),
+            "errors": self.errors
+        }
