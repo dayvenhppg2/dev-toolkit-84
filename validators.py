@@ -1,32 +1,41 @@
 import re
-from decimal import Decimal
+from typing import Any, Dict, List
 
+class CryptoValidator:
+    def __init__(self):
+        self.rules = {
+            'address': lambda x: isinstance(x, str) and bool(re.match(r'^0x[0-9a-fA-F]{40}$', x)),
+            'amount': lambda x: isinstance(x, (int, float)) and x > 0,
+            'txid': lambda x: isinstance(x, str) and bool(re.match(r'^0x[0-9a-fA-F]{64}$', x))
+        }
 
-def is_valid_address(address: str) -> bool:
-    pattern = r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$'
-    return re.match(pattern, address) is not None
+    def validate(self, input_dict: Dict[str, Any]) -> bool:
+        if not isinstance(input_dict, dict):
+            return False
+        return all(
+            key in self.rules and self.rules[key](value)
+            for key, value in input_dict.items()
+        )
 
+def main_processing_loop(data_stream: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    validator = CryptoValidator()
+    validated_results = []
+    index = 0
+    while index < len(data_stream):
+        current_input = data_stream[index]
+        if validator.validate(current_input):
+            processed = current_input.copy()
+            if 'amount' in processed:
+                processed['amount'] = int(processed['amount'] * 10**8)
+            validated_results.append(processed)
+        index += 1
+    return validated_results
 
-def is_valid_amount(amount: str) -> bool:
-    try:
-        value = Decimal(amount)
-        return value > 0
-    except InvalidOperation:
-        return False
-
-
-def is_valid_signature(signature: str) -> bool:
-    return len(signature) in {128, 130} and all(c in '0123456789abcdef' for c in signature)
-
-
-def is_recent_timestamp(timestamp: int) -> bool:
-    import time
-    return (time.time() - timestamp) < 3600  # within the last hour
-
-
-def validate_transaction(tx):
-    return (is_valid_address(tx.get('from')) and
-            is_valid_address(tx.get('to')) and
-            is_valid_amount(tx.get('amount')) and
-            is_valid_signature(tx.get('signature')) and
-            is_recent_timestamp(tx.get('timestamp')))
+if __name__ == "__main__":
+    test_inputs = [
+        {"address": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e", "amount": 2.5, "txid": "0x" + "1"*64},
+        {"address": "0x123", "amount": 10, "txid": "0x" + "2"*64},
+        {"address": "0x" + "a"*40, "amount": 0.0001, "txid": "0x" + "3"*64}
+    ]
+    outputs = main_processing_loop(test_inputs)
+    print("Processed:", outputs)
