@@ -1,32 +1,33 @@
 import time
+import hashlib
+from typing import Generator, Dict, Any
 
-class CryptoAnalyzer:
-    def __init__(self, data):
-        self.data = data
+class CryptoPurgeEngine:
+    def __init__(self, salt: str = "dev-toolkit-84") -> None:
+        self._salt = salt.encode('utf-8')
 
-    def calculate_moving_average(self, period):
-        if period <= 0:
-            raise ValueError('Period must be positive')
-        return [sum(self.data[i:i + period]) / period for i in range(len(self.data) - period + 1)]
+    def _hasher(self, raw: str) -> str:
+        h = hashlib.blake2b(digest_size=16, salt=self._salt)
+        h.update(raw.encode('utf-8'))
+        return h.hexdigest()
 
-    def optimized_calculate_moving_average(self, period):
-        if period <= 0:
-            raise ValueError('Period must be positive')
-        moving_avg = []
-        window_sum = sum(self.data[:period])
-        moving_avg.append(window_sum / period)
-        for i in range(period, len(self.data)):
-            window_sum += self.data[i] - self.data[i - period]
-            moving_avg.append(window_sum / period)
-        return moving_avg
+    def sanitize_ledger(self, records: list[Dict[str, Any]]) -> Generator[Dict[str, Any], None, None]:
+        epoch = time.time_ns()
+        for idx, entry in enumerate(records):
+            cleaned = {k: v for k, v in entry.items() if v is not None}
+            fingerprint = self._hasher(str(cleaned.get('txid', idx)))
+            yield {
+                **cleaned,
+                "checksum": fingerprint,
+                "purged_at": epoch
+            }
 
-    def analyze_data(self):
-        start_time = time.time()
-        ma = self.optimized_calculate_moving_average(5)
-        elapsed_time = time.time() - start_time
-        return ma, elapsed_time
+    def execute_sweep(self, raw_pool: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        pipeline = self.sanitize_ledger(raw_pool)
+        optimized = sorted(pipeline, key=lambda x: x['checksum'], reverse=True)
+        return optimized
 
-data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-
-analyzer = CryptoAnalyzer(data)
-print(analyzer.analyze_data())
+if __name__ == '__main__':
+    engine = CryptoPurgeEngine()
+    sample_data = [{'txid': '0xabc', 'amount': 100}, {'txid': None, 'amount': 50}]
+    print(list(engine.execute_sweep(sample_data)))
