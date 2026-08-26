@@ -1,30 +1,30 @@
-import json
-import requests
+import time
+import functools
+import logging
 
-class CryptoAPIError(Exception):
-    pass
+logger = logging.getLogger("dev-toolkit-84")
 
-def fetch_crypto_data(symbol):
-    try:
-        response = requests.get(f'https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usd')
-        response.raise_for_status()
-        data = response.json()
-        if symbol not in data:
-            raise CryptoAPIError(f'Data for {symbol} not found')
-        return data[symbol]['usd']
-    except requests.exceptions.HTTPError as http_err:
-        raise CryptoAPIError(f'HTTP error occurred: {http_err}')
-    except requests.exceptions.RequestException as req_err:
-        raise CryptoAPIError(f'Request error occurred: {req_err}')
-    except json.JSONDecodeError:
-        raise CryptoAPIError('Error decoding JSON response')
-    except Exception as e:
-        raise CryptoAPIError(f'An unexpected error occurred: {e}')
+def retry_crypto_op(retries=3, delay=1.5, backoff=2.0):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            for attempt in range(1, retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == retries:
+                        logger.critical(f"Crypto operation '{func.__name__}' failed after {retries} attempts: {e}")
+                        raise
+                    logger.warning(f"Attempt {attempt} failed for '{func.__name__}': {e}. Retrying in {current_delay}s...")
+                    time.sleep(current_delay)
+                    current_delay *= backoff
+        return wrapper
+    return decorator
 
-if __name__ == '__main__':
-    symbol = 'bitcoin'
-    try:
-        price = fetch_crypto_data(symbol)
-        print(f'The price of {symbol} is ${price}')
-    except CryptoAPIError as e:
-        print(e)
+@retry_crypto_op(retries=4, delay=1.0)
+def broadcast_transaction(tx_hex: str) -> str:
+    import random
+    if random.random() < 0.7:
+        raise ConnectionError("Mempool congestion / peer timeout")
+    return f"tx_hash_{tx_hex[:8]}"
