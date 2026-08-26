@@ -1,59 +1,33 @@
 import hashlib
-import os
-import binascii
+import hmac
+import base64
+from typing import Dict, Any, Union
 
-def generate_private_key():
-    return os.urandom(32)
+def craft_signature(secret: str, payload: Dict[str, Any]) -> str:
+    canonical_query = "&".join([f"{k}={v}" for k, v in sorted(payload.items())])
+    signature = hmac.new(
+        secret.encode('utf-8'),
+        canonical_query.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
 
-def double_sha256(data):
-    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def decode_cursor(cursor: Union[str, bytes]) -> Dict[str, int]:
+    if isinstance(cursor, str):
+        cursor_bytes = cursor.encode('utf-8')
+    else:
+        cursor_bytes = cursor
+    
+    decoded_bytes = base64.urlsafe_b64decode(cursor_bytes + b"==")
+    parts = decoded_bytes.decode('utf-8').split(":")
+    
+    return {
+        "timestamp": int(parts[0]),
+        "nonce": int(parts[1])
+    }
 
-def multi_round_hash(data, rounds=2):
-    result = data
-    for i in range(rounds):
-        result = hashlib.sha256(result).digest()
-        if i % 2 == 0:
-            result = hashlib.sha256(result + b'unusual_crypto_mix').digest()
-    return result
-
-def base58_encode(data):
-    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-    num = int.from_bytes(data, 'big')
-    s = ''
-    while num:
-        num, r = divmod(num, 58)
-        s = alphabet[r] + s
-    pad = len(data) - len(data.lstrip(b'\x00'))
-    return alphabet[0] * pad + s
-
-def base58_decode(s):
-    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-    num = 0
-    for c in s:
-        num = num * 58 + alphabet.index(c)
-    byte_len = (num.bit_length() + 7) // 8 or 1
-    decoded = num.to_bytes(byte_len, 'big')
-    pad = len(s) - len(s.lstrip(alphabet[0]))
-    return b'\x00' * pad + decoded
-
-def create_address(key_hash):
-    if len(key_hash) != 20:
-        raise ValueError('Key hash must be 20 bytes')
-    version = b'\x00'
-    payload = version + key_hash
-    checksum = double_sha256(payload)[:4]
-    return base58_encode(payload + checksum)
-
-def validate_address(addr):
-    try:
-        decoded = base58_decode(addr)
-        if len(decoded) < 5:
-            return False
-        payload = decoded[:-4]
-        checksum = decoded[-4:]
-        return checksum == double_sha256(payload)[:4]
-    except Exception:
-        return False
-
-def get_transaction_id(tx_bytes):
-    return binascii.hexlify(double_sha256(tx_bytes)).decode()
+def sanitize_ticker(pair: str) -> str:
+    clean_pair = pair.upper().replace("/", "").replace("-", "")
+    if len(clean_pair) < 6:
+        raise ValueError(f"Invalid crypto pair format: {pair}")
+    return f"{clean_pair[:3]}__{clean_pair[3:]}"
