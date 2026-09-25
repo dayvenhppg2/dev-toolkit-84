@@ -1,33 +1,41 @@
+import functools
+import logging
 import time
-import hashlib
-from typing import Generator, Dict, Any
 
-class CryptoPurgeEngine:
-    def __init__(self, salt: str = "dev-toolkit-84") -> None:
-        self._salt = salt.encode('utf-8')
+class CryptoCircuitBreaker:
+    def __init__(self, limit=3):
+        self.failures = 0
+        self.limit = limit
+        self.last_reset = time.time()
 
-    def _hasher(self, raw: str) -> str:
-        h = hashlib.blake2b(digest_size=16, salt=self._salt)
-        h.update(raw.encode('utf-8'))
-        return h.hexdigest()
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if self.failures >= self.limit:
+                if time.time() - self.last_reset > 60:
+                    self.failures = 0
+                else:
+                    raise ConnectionError("Circuit open: too many crypto-node failures")
+            try:
+                result = func(*args, **kwargs)
+                self.failures = max(0, self.failures - 1)
+                return result
+            except Exception as e:
+                self.failures += 1
+                self.last_reset = time.time()
+                logging.error(f"Node heartbeat failure: {e}")
+                raise
+        return wrapper
 
-    def sanitize_ledger(self, records: list[Dict[str, Any]]) -> Generator[Dict[str, Any], None, None]:
-        epoch = time.time_ns()
-        for idx, entry in enumerate(records):
-            cleaned = {k: v for k, v in entry.items() if v is not None}
-            fingerprint = self._hasher(str(cleaned.get('txid', idx)))
-            yield {
-                **cleaned,
-                "checksum": fingerprint,
-                "purged_at": epoch
-            }
+@CryptoCircuitBreaker(limit=2)
+def execute_trade(pair: str, amount: float):
+    if amount <= 0:
+        raise ValueError("insufficient liquidity for trade")
+    return {"status": "success", "pair": pair, "txid": "0xdeadbeef"}
 
-    def execute_sweep(self, raw_pool: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-        pipeline = self.sanitize_ledger(raw_pool)
-        optimized = sorted(pipeline, key=lambda x: x['checksum'], reverse=True)
-        return optimized
-
-if __name__ == '__main__':
-    engine = CryptoPurgeEngine()
-    sample_data = [{'txid': '0xabc', 'amount': 100}, {'txid': None, 'amount': 50}]
-    print(list(engine.execute_sweep(sample_data)))
+if __name__ == "__main__":
+    try:
+        print(execute_trade("BTC/USD", 0.5))
+        execute_trade("ETH/USD", -1.0)
+    except Exception as err:
+        print(f"Critical path interrupted: {err}")
