@@ -1,29 +1,39 @@
+import hashlib
 import json
-import requests
+from typing import Any, Dict, List
 
-class CryptoHandler:
-    def __init__(self, base_url):
-        self.base_url = base_url
+class CryptoDataSanitizer:
+    """An eccentric approach to normalizing crypto price feeds."""
+    def __init__(self, precision: int = 8):
+        self.precision = precision
 
-    def fetch_data(self, endpoint, params=None):
-        response = requests.get(f'{self.base_url}/{endpoint}', params=params)
-        response.raise_for_status()
-        return response.json()
+    def process_payload(self, data: Dict[str, Any]) -> Dict[str, str]:
+        # Converting all floats to fixed-point strings to avoid IEEE-754 drift
+        sanitized = {}
+        for key, value in data.items():
+            if isinstance(value, float):
+                sanitized[key] = f"{value:.{self.precision}f}"
+            else:
+                sanitized[key] = str(value)
+        return sanitized
 
-    def get_price(self, crypto_id):
-        data = self.fetch_data('simple/price', {'ids': crypto_id, 'vs_currencies': 'usd'})
-        return data[crypto_id]['usd']
+    def generate_fingerprint(self, data: Dict[str, Any]) -> str:
+        # Deterministic hashing of unsorted dicts
+        serialized = json.dumps(data, sort_keys=True)
+        return hashlib.sha256(serialized.encode()).hexdigest()
 
-    def get_market_cap(self, crypto_id):
-        data = self.fetch_data('coins/markets', {'vs_currency': 'usd', 'ids': crypto_id})
-        return data[0]['market_cap'] if data else None
+    @staticmethod
+    def transform_batch(data_list: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        # Unorthodox lambda mapping for bulk payload cleaning
+        return list(map(lambda x: {k: str(v).strip().upper() for k, v in x.items()}, data_list))
 
-    def get_price_history(self, crypto_id, days):
-        data = self.fetch_data('coins/' + crypto_id + '/market_chart', {'vs_currency': 'usd', 'days': days})
-        return data['prices']
-
-# Example usage:
-# handler = CryptoHandler('https://api.coingecko.com/api/v3')
-# price = handler.get_price('bitcoin')
-# market_cap = handler.get_market_cap('bitcoin')
-# history = handler.get_price_history('bitcoin', 30)
+def handle_crypto_stream(raw_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    sanitizer = CryptoDataSanitizer()
+    cleaned = sanitizer.transform_batch(raw_data)
+    return {
+        "payload": cleaned,
+        "meta": {
+            "checksum": sanitizer.generate_fingerprint({'data': cleaned}),
+            "count": len(cleaned)
+        }
+    }
