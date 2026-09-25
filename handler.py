@@ -1,39 +1,33 @@
-import hashlib
-import json
-from typing import Any, Dict, List
+import time
+import random
+import functools
+from typing import Callable, Any
 
-class CryptoDataSanitizer:
-    """An eccentric approach to normalizing crypto price feeds."""
-    def __init__(self, precision: int = 8):
-        self.precision = precision
+def retry_crypto_call(max_retries: int = 3, backoff: float = 0.5):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_ex = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    sleep_time = backoff * (2 ** attempt) + (random.uniform(0, 0.1))
+                    time.sleep(sleep_time)
+            raise last_ex
+        return wrapper
+    return decorator
 
-    def process_payload(self, data: Dict[str, Any]) -> Dict[str, str]:
-        # Converting all floats to fixed-point strings to avoid IEEE-754 drift
-        sanitized = {}
-        for key, value in data.items():
-            if isinstance(value, float):
-                sanitized[key] = f"{value:.{self.precision}f}"
-            else:
-                sanitized[key] = str(value)
-        return sanitized
+@retry_crypto_call(max_retries=5, backoff=1.0)
+def fetch_price_data(ticker: str) -> dict:
+    import requests
+    response = requests.get(f"https://api.crypto-service.io/v1/ticker/{ticker}", timeout=5)
+    response.raise_for_status()
+    return response.json()
 
-    def generate_fingerprint(self, data: Dict[str, Any]) -> str:
-        # Deterministic hashing of unsorted dicts
-        serialized = json.dumps(data, sort_keys=True)
-        return hashlib.sha256(serialized.encode()).hexdigest()
-
-    @staticmethod
-    def transform_batch(data_list: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-        # Unorthodox lambda mapping for bulk payload cleaning
-        return list(map(lambda x: {k: str(v).strip().upper() for k, v in x.items()}, data_list))
-
-def handle_crypto_stream(raw_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    sanitizer = CryptoDataSanitizer()
-    cleaned = sanitizer.transform_batch(raw_data)
-    return {
-        "payload": cleaned,
-        "meta": {
-            "checksum": sanitizer.generate_fingerprint({'data': cleaned}),
-            "count": len(cleaned)
-        }
-    }
+def process_market_order(payload: dict):
+    try:
+        return fetch_price_data(payload.get('pair', 'BTC-USD'))
+    except Exception as err:
+        return {"status": "failed", "reason": str(err)}
