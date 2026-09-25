@@ -1,34 +1,47 @@
 # dev-toolkit-84
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-dev-toolkit-84 is a Python toolkit that assists developers in cryptocurrency projects by offering streamlined functions for wallet operations and blockchain queries. It supports multiple chains and helps with common development tasks like key generation and transaction preparation.
+`dev-toolkit-84` is a robust Python-based CLI utility designed to streamline crypto-asset management and blockchain data analysis. It provides developers with high-performance tools for real-time market tracking, automated wallet monitoring, and secure transaction signing.
 
 ## Features
-- HD wallet generation and key derivation for Bitcoin, Ethereum, and Solana
-- Transaction building and signing with EIP-1559 fee estimation for EVM chains
-- Unified queries for account balances, token holdings, and recent transactions
-- Cryptographic helpers for message signing and address validation
+
+*   **Real-time Price Engine:** Fetches low-latency market data across major CEX and DEX platforms using asynchronous WebSocket streams.
+*   **Wallet Sentinel:** Monitors specific EVM-compatible addresses for incoming transfers and suspicious smart contract interactions with instant alerting.
+*   **Encrypted Key Vault:** Implements AES-256 encryption for local storage of private keys, ensuring secure signing of transactions without exposing sensitive data in logs.
+*   **Gas Oracle:** Analyzes current mempool traffic to provide precise gas fee estimates, optimizing transaction success rates during network congestion.
 
 ## Installation
 
+Ensure you have Python 3.10+ installed.
+
 ```bash
-git clone https://github.com/Developer/dev-toolkit-84.git
+# Clone the repository
+git clone https://github.com/developer/dev-toolkit-84.git
 cd dev-toolkit-84
-pip install -e .
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-## Usage
+## Basic Usage
 
-```python
-from dev_toolkit import generate_wallet, get_balance, estimate_gas
+The toolkit is managed via a command-line interface. To initialize a wallet monitor for a specific address, run the following command:
 
-wallet = generate_wallet(chain="ethereum")
-print(wallet.address)
+```bash
+# Monitor an address for activity
+python main.py monitor --address 0x71C7656... --network ethereum
 
-balance = get_balance(wallet.address, chain="ethereum")
-print(f"Balance: {balance}")
-
-gas = estimate_gas(chain="ethereum", to="0x742d35Cc6634C0532925a3b844Bc454e4438f44e", value=0.05)
-print(f"Estimated gas: {gas}")
+# Get current gas prices for the mainnet
+python main.py gas-estimate --network ethereum
 ```
+
+To configure your API keys and RPC endpoints, copy the `.env.example` file to `.env` and populate it with your specific credentials before running the toolkit.
+
+## License
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
