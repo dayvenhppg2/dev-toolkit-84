@@ -1,21 +1,35 @@
 import logging
 from logging.handlers import RotatingFileHandler
+import os
 
-def setup_logger(log_file='app.log', max_bytes=5 * 1024 * 1024, backup_count=3):
-    logger = logging.getLogger('CryptoLogger')
+def get_crypto_logger(name: str = 'dev-toolkit-84'):
+    logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-
-    handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
-    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
+    if logger.handlers:
+        return logger
+    
+    formatter = logging.Formatter(
+        '[%(asctime)s] [%(levelname)s] [%(module)s] -> %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    log_dir = 'logs'
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+        
+    file_path = os.path.join(log_dir, f'{name}.log')
+    handler = RotatingFileHandler(
+        file_path, 
+        maxBytes=1024 * 1024 * 5, 
+        backupCount=3
+    )
+    handler.setFormatter(formatter)
     logger.addHandler(handler)
+    
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+    logger.addHandler(console)
+    
     return logger
 
-# Example usage
-if __name__ == '__main__':
-    logger = setup_logger()
-    logger.info('Logger is set up successfully.')
-    logger.warning('This is a warning message.')
-    logger.error('This is an error message.')
-    for i in range(100):
-        logger.debug(f'Debugging message {i}')
+logger = get_crypto_logger()
