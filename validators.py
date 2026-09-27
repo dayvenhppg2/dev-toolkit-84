@@ -1,32 +1,40 @@
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Optional
 
-class CryptoValidationError(ValueError):
-    pass
+class CryptoValidator:
+    ADDRESS_PATTERNS = {
+        'BTC': r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$',
+        'ETH': r'^0x[a-fA-F0-9]{40}$'
+    }
 
-def validate_payload(data: Dict[str, Any]) -> bool:
-    required = {"txid", "amount", "currency"}
-    if not isinstance(data, dict):
-        raise CryptoValidationError("Payload must be a dictionary mapping")
-    
-    missing = required - data.keys()
-    if missing:
-        raise CryptoValidationError(f"Missing critical crypto fields: {list(missing)}")
-    
-    amount = data.get("amount")
-    if isinstance(amount, (int, float)):
-        if amount <= 0:
-            raise CryptoValidationError("Transaction amount must be strictly positive")
-    elif isinstance(amount, str):
+    @staticmethod
+    def validate_tx(data: Dict[str, Any]) -> bool:
+        required = {'asset', 'amount', 'address'}
+        if not all(k in data for k in required):
+            return False
+        
+        pattern = CryptoValidator.ADDRESS_PATTERNS.get(data['asset'])
+        if not pattern or not re.match(pattern, data['address']):
+            return False
+            
         try:
-            if float(amount) <= 0:
-                raise CryptoValidationError("Transaction amount string must be strictly positive")
-        except ValueError as err:
-            raise CryptoValidationError(f"Invalid numeric string for amount: {amount}") from err
-    else:
-        raise CryptoValidationError("Amount field is of unsupported type")
+            amount = float(data['amount'])
+            return amount > 0
+        except (ValueError, TypeError):
+            return False
 
-    currency = data["currency"]
-    if not isinstance(currency, str) or len(currency) < 3:
-        raise CryptoValidationError("Currency ticker must be at least 3 characters")
-    
-    return True
+class InputGuard:
+    def __init__(self, validator_func):
+        self.validator = validator_func
+
+    def __call__(self, func):
+        def wrapper(*args, **kwargs):
+            if not self.validator(args[0]):
+                raise ValueError(f"Invalid crypto payload: {args[0]}")
+            return func(*args, **kwargs)
+        return wrapper
+
+def sanitize_input(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if CryptoValidator.validate_tx(payload):
+        return {k: str(v).strip() for k, v in payload.items()}
+    return None
