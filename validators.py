@@ -1,40 +1,29 @@
+from typing import Union, Callable, Any
 import re
-from typing import Any, Dict, Optional
 
-class CryptoValidator:
-    ADDRESS_PATTERNS = {
-        'BTC': r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$',
-        'ETH': r'^0x[a-fA-F0-9]{40}$'
-    }
+class AddressValidator:
+    """Utility for verifying crypto wallet address formats using pattern matching."""
 
-    @staticmethod
-    def validate_tx(data: Dict[str, Any]) -> bool:
-        required = {'asset', 'amount', 'address'}
-        if not all(k in data for k in required):
-            return False
-        
-        pattern = CryptoValidator.ADDRESS_PATTERNS.get(data['asset'])
-        if not pattern or not re.match(pattern, data['address']):
-            return False
-            
-        try:
-            amount = float(data['amount'])
-            return amount > 0
-        except (ValueError, TypeError):
-            return False
+    def __init__(self, network: str = "eth") -> None:
+        self.patterns: dict[str, str] = {
+            "eth": r"^0x[a-fA-F0-9]{40}$",
+            "btc": r"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$"
+        }
+        self.network = network
 
-class InputGuard:
-    def __init__(self, validator_func):
-        self.validator = validator_func
+    def validate(self, address: str) -> bool:
+        """Check if address matches the expected blockchain pattern."""
+        pattern = self.patterns.get(self.network.lower())
+        return bool(re.match(pattern, address)) if pattern else False
 
-    def __call__(self, func):
-        def wrapper(*args, **kwargs):
-            if not self.validator(args[0]):
-                raise ValueError(f"Invalid crypto payload: {args[0]}")
-            return func(*args, **kwargs)
-        return wrapper
+def sanitize_input(data: Any, transformer: Callable[[Any], str] = str) -> str:
+    """Transform input via callable and strip whitespace/special artifacts."""
+    raw_data: str = transformer(data)
+    return re.sub(r"[^a-zA-Z0-9]", "", raw_data.strip())
 
-def sanitize_input(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if CryptoValidator.validate_tx(payload):
-        return {k: str(v).strip() for k, v in payload.items()}
-    return None
+def validate_checksum(data: str, checksum_fn: Callable[[str], bool]) -> bool:
+    """Functional wrapper for custom blockchain-specific checksum routines."""
+    try:
+        return checksum_fn(data)
+    except Exception:
+        return False
