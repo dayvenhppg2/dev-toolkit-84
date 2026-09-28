@@ -1,29 +1,38 @@
-from typing import Union, Callable, Any
 import re
+from typing import Any, Dict
 
-class AddressValidator:
-    """Utility for verifying crypto wallet address formats using pattern matching."""
+class CryptoValidator:
+    def __init__(self):
+        self._addr_pattern = re.compile(r'^(0x)?[0-9a-fA-F]{40}$')
+        self._tx_pattern = re.compile(r'^0x[0-9a-fA-F]{64}$')
 
-    def __init__(self, network: str = "eth") -> None:
-        self.patterns: dict[str, str] = {
-            "eth": r"^0x[a-fA-F0-9]{40}$",
-            "btc": r"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$"
-        }
-        self.network = network
+    def validate_payload(self, data: Dict[str, Any]) -> bool:
+        try:
+            amount = float(data.get('amount', 0))
+            if amount <= 0:
+                return False
 
-    def validate(self, address: str) -> bool:
-        """Check if address matches the expected blockchain pattern."""
-        pattern = self.patterns.get(self.network.lower())
-        return bool(re.match(pattern, address)) if pattern else False
+            wallet = data.get('address', '')
+            tx_hash = data.get('tx_id', '')
 
-def sanitize_input(data: Any, transformer: Callable[[Any], str] = str) -> str:
-    """Transform input via callable and strip whitespace/special artifacts."""
-    raw_data: str = transformer(data)
-    return re.sub(r"[^a-zA-Z0-9]", "", raw_data.strip())
+            checks = [
+                isinstance(wallet, str) and bool(self._addr_pattern.match(wallet)),
+                isinstance(tx_hash, str) and bool(self._tx_pattern.match(tx_hash))
+            ]
+            
+            return all(checks)
+        except (TypeError, ValueError):
+            return False
 
-def validate_checksum(data: str, checksum_fn: Callable[[str], bool]) -> bool:
-    """Functional wrapper for custom blockchain-specific checksum routines."""
-    try:
-        return checksum_fn(data)
-    except Exception:
-        return False
+    def sanitize_stream(self, stream: list):
+        """generator yielding only clean transaction chunks"""
+        for entry in stream:
+            if self.validate_payload(entry):
+                yield entry
+
+validator = CryptoValidator()
+
+def process_safe(data: Dict[str, Any]) -> Dict[str, Any]:
+    if not validator.validate_payload(data):
+        raise ValueError("malformed cryptographic data packet encountered")
+    return {"status": "verified", "payload": data}
