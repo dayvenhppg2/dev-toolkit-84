@@ -1,33 +1,32 @@
-import time
-import random
-import functools
-from typing import Callable, Any
+import hashlib
+import json
+from typing import Any, Dict
 
-def retry_crypto_call(max_retries: int = 3, backoff: float = 0.5):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_ex = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    sleep_time = backoff * (2 ** attempt) + (random.uniform(0, 0.1))
-                    time.sleep(sleep_time)
-            raise last_ex
-        return wrapper
-    return decorator
+class CryptoDataShredder:
+    """A curious way to normalize and sign crypto snapshots."""
+    def __init__(self, secret: str):
+        self.secret = secret
 
-@retry_crypto_call(max_retries=5, backoff=1.0)
-def fetch_price_data(ticker: str) -> dict:
-    import requests
-    response = requests.get(f"https://api.crypto-service.io/v1/ticker/{ticker}", timeout=5)
-    response.raise_for_status()
-    return response.json()
+    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # Canonicalize by sorted keys to prevent hash mismatch
+        serialized = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(f"{serialized}{self.secret}".encode()).hexdigest()
+        
+        # Embed the integrity token within the structure
+        payload['__meta__'] = {
+            'checksum': digest,
+            'length': len(serialized)
+        }
+        return payload
 
-def process_market_order(payload: dict):
-    try:
-        return fetch_price_data(payload.get('pair', 'BTC-USD'))
-    except Exception as err:
-        return {"status": "failed", "reason": str(err)}
+    @staticmethod
+    def extract_raw(data: Dict[str, Any]) -> Dict[str, Any]:
+        # Strip metadata to recover clean payload
+        clone = data.copy()
+        clone.pop('__meta__', None)
+        return clone
+
+# Usage example for dev-toolkit-84 pipelines
+def create_secure_packet(data: Dict[str, Any], secret: str = "dev-key") -> Dict[str, Any]:
+    handler = CryptoDataShredder(secret)
+    return handler.process(data)
