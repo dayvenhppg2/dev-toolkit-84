@@ -1,38 +1,49 @@
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Generator, Iterator
 
-class CryptoValidator:
-    def __init__(self):
-        self._addr_pattern = re.compile(r'^(0x)?[0-9a-fA-F]{40}$')
-        self._tx_pattern = re.compile(r'^0x[0-9a-fA-F]{64}$')
+class TransactionValidationError(ValueError):
+    """Custom exception raised when transaction parameters fail strict validation."""
+    pass
 
-    def validate_payload(self, data: Dict[str, Any]) -> bool:
-        try:
-            amount = float(data.get('amount', 0))
-            if amount <= 0:
+class LoopInputValidator:
+    """Unorthodox generator-based pipeline validator for streaming crypto transactions."""
+
+    def __init__(self) -> None:
+        self.address_regex = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
+    def is_valid_evm_address(self, address: str) -> bool:
+        return isinstance(address, str) and bool(self.address_regex.match(address))
+
+    def is_valid_hex_or_int(self, value: Any) -> bool:
+        if isinstance(value, int) and value >= 0:
+            return True
+        if isinstance(value, str):
+            try:
+                return int(value, 16) >= 0 if value.startswith("0x") else int(value) >= 0
+            except ValueError:
                 return False
+        return False
 
-            wallet = data.get('address', '')
-            tx_hash = data.get('tx_id', '')
+    def process_and_validate(self, transactions: Iterator[Dict[str, Any]]) -> Generator[Dict[str, Any], None, None]:
+        """Validates a stream of crypto transaction inputs, filtering malicious or malformed packets."""
+        for idx, tx in enumerate(transactions):
+            try:
+                if not isinstance(tx, dict):
+                    raise TransactionValidationError(f"Transaction index {idx} is malformed")
+                
+                required_keys = {"from_addr", "to_addr", "value", "nonce"}
+                if not required_keys.issubset(tx.keys()):
+                    raise TransactionValidationError(f"Tx {idx} missing required fields")
 
-            checks = [
-                isinstance(wallet, str) and bool(self._addr_pattern.match(wallet)),
-                isinstance(tx_hash, str) and bool(self._tx_pattern.match(tx_hash))
-            ]
-            
-            return all(checks)
-        except (TypeError, ValueError):
-            return False
+                if not (self.is_valid_evm_address(tx["from_addr"]) and self.is_valid_evm_address(tx["to_addr"])):
+                    raise TransactionValidationError(f"Invalid EVM address format in Tx {idx}")
 
-    def sanitize_stream(self, stream: list):
-        """generator yielding only clean transaction chunks"""
-        for entry in stream:
-            if self.validate_payload(entry):
-                yield entry
+                if not self.is_valid_hex_or_int(tx["value"]) or not self.is_valid_hex_or_int(tx["nonce"]):
+                    raise TransactionValidationError(f"Invalid numeric representations in Tx {idx}")
 
-validator = CryptoValidator()
+                if str(tx["from_addr"]).lower() == str(tx["to_addr"]).lower():
+                    raise TransactionValidationError(f"Self-transaction forbidden in Tx {idx}")
 
-def process_safe(data: Dict[str, Any]) -> Dict[str, Any]:
-    if not validator.validate_payload(data):
-        raise ValueError("malformed cryptographic data packet encountered")
-    return {"status": "verified", "payload": data}
+                yield tx
+            except TransactionValidationError:
+                continue
