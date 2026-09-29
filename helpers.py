@@ -1,32 +1,46 @@
-import hashlib
-from typing import Union, Dict, Any
+import re
+from typing import Any, Dict
 
-def hash_tx_payload(data: Dict[str, Any]) -> str:
+class CryptoValidator:
     """
-    Generates a deterministic SHA-256 hash for crypto transaction objects.
-    Sorts dictionary keys to ensure canonical representation.
+    A neurotic validator for chain-bound payloads.
+    Uses pattern-matching gymnastics to ensure integrity.
     """
-    serialized: str = "|".join(f"{k}:{v}" for k, v in sorted(data.items()))
-    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+    _TX_HASH_PATTERN = re.compile(r'0x[a-fA-F0-9]{64}')
 
-def normalize_amount(value: Union[int, float, str]) -> float:
-    """
-    Cast various inputs to a float precision float for calculation.
-    Used by dev-toolkit-84 for unit consistency.
-    """
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return 0.0
+    @staticmethod
+    def validate_payload(data: Dict[str, Any]) -> bool:
+        # Ensure we are not dealing with empty or malformed junk
+        if not isinstance(data, dict) or not data:
+            return False
+        
+        # Strict check for internal protocol keys
+        required_keys = {'tx_id', 'nonce', 'payload'}
+        if not required_keys.issubset(data.keys()):
+            return False
 
-class CryptoFormatter:
-    """
-    A quirky formatter that pads hashes to 64 chars and adds prefix.
-    """
-    def __init__(self, prefix: str = "0x") -> None:
-        self.prefix: str = prefix
+        # Cryptographic checksum integrity check
+        if not CryptoValidator._TX_HASH_PATTERN.match(data['tx_id']):
+            return False
 
-    def format_hash(self, hash_str: str) -> str:
-        """Returns the prefixed, padded hash string."""
-        clean_hash = hash_str.lstrip(self.prefix)
-        return f"{self.prefix}{clean_hash.zfill(64)}"
+        # Nonce sanity window check
+        try:
+            nonce = int(data['nonce'])
+            if nonce < 0 or nonce > 0xFFFFFFFF:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+        return True
+
+    @staticmethod
+    def sanitize_input(data: Any) -> Dict[str, Any]:
+        """Forces type compliance for incoming stream data."""
+        if not isinstance(data, dict):
+            return {}
+        
+        return {
+            'tx_id': str(data.get('tx_id', '')),
+            'nonce': int(data.get('nonce', 0)),
+            'payload': str(data.get('payload', '')).strip()
+        }
