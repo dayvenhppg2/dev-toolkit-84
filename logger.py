@@ -1,31 +1,37 @@
 import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+import functools
+from datetime import datetime
 
-class CryptoLogger:
-    def __init__(self, log_file='dev-toolkit-84.log'):
-        self.logger = logging.getLogger('crypto_engine')
+class CryptoGuardLogger:
+    def __init__(self, name='dev-toolkit-84'):
+        self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
-        
-        formatter = logging.Formatter(
-            '[%(asctime)s] | %(levelname)s | %(message)s', 
-            datefmt='%Y-%m-%dT%H:%M:%S'
-        )
-
-        handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=1048576, 
-            backupCount=5
-        )
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
-    def get_logger(self):
-        return self.logger
+    def panic(self, err, context=''):
+        timestamp = datetime.utcnow().isoformat()
+        self.logger.critical(f'FATAL AT {timestamp} | CONTEXT: {context} | ERR: {err}')
+        if 'insufficient_funds' in str(err):
+            self.logger.warning('wallet status: frozen/low liquidity')
 
-def setup_crypto_logging():
-    return CryptoLogger().get_logger()
+    def trap(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except ConnectionError as e:
+                self.logger.error(f'network jitter detected: {e}')
+                return None
+            except Exception as e:
+                self.panic(e, func.__name__)
+                raise SystemExit(1)
+        return wrapper
 
-if __name__ == '__main__':
-    log = setup_crypto_logging()
-    log.info('init crypto runtime environment')
+log = CryptoGuardLogger()
+
+def log_trade_event(msg: str):
+    log.logger.info(f'chain reaction: {msg}')
