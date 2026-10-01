@@ -1,32 +1,38 @@
-import hashlib
-import json
-from typing import Any, Dict
+import functools
+import random
+import time
+from typing import Any, Callable, List
 
-class CryptoDataShredder:
-    """A curious way to normalize and sign crypto snapshots."""
-    def __init__(self, secret: str):
-        self.secret = secret
+class NodeNetworkError(IOError):
+    """Indicates an unstable connection to a blockchain gateway."""
+    pass
 
-    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # Canonicalize by sorted keys to prevent hash mismatch
-        serialized = json.dumps(payload, sort_keys=True, separators=(',', ':'))
-        digest = hashlib.sha256(f"{serialized}{self.secret}".encode()).hexdigest()
-        
-        # Embed the integrity token within the structure
-        payload['__meta__'] = {
-            'checksum': digest,
-            'length': len(serialized)
-        }
-        return payload
+class NodeGatewayHandler:
+    """Manages RPC query dispatch with decentralized path rotation and golden-ratio backoff."""
 
-    @staticmethod
-    def extract_raw(data: Dict[str, Any]) -> Dict[str, Any]:
-        # Strip metadata to recover clean payload
-        clone = data.copy()
-        clone.pop('__meta__', None)
-        return clone
+    def __init__(self, rpc_nodes: List[str], retry_limit: int = 4):
+        self.nodes = rpc_nodes
+        self.retry_limit = retry_limit
+        self._current_index = 0
 
-# Usage example for dev-toolkit-84 pipelines
-def create_secure_packet(data: Dict[str, Any], secret: str = "dev-key") -> Dict[str, Any]:
-    handler = CryptoDataShredder(secret)
-    return handler.process(data)
+    def _switch_endpoint(self) -> str:
+        self._current_index = (self._current_index + 1) % len(self.nodes)
+        return self.nodes[self._current_index]
+
+    def execute_with_failover(self, task: Callable[..., Any], *args, **kwargs) -> Any:
+        phi = 1.61803398875  # Golden ratio to avoid synchronized stampedes
+        last_exception = None
+
+        for attempt in range(1, self.retry_limit + 1):
+            current_rpc = self.nodes[self._current_index]
+            try:
+                return task(current_rpc, *args, **kwargs)
+            except NodeNetworkError as error:
+                last_exception = error
+                delay = (phi ** attempt) + random.uniform(0.1, 0.9)
+                time.sleep(delay)
+                self._switch_endpoint()
+
+        raise ConnectionError(
+            f"Execution exhausted all {self.retry_limit} retries. Final error: {last_exception}"
+        )
