@@ -1,29 +1,23 @@
+import decimal
 import hashlib
-import time
-import json
-from typing import Any, Dict
+from typing import Any, Union
 
-def hash_payload(data: Dict[str, Any]) -> str:
-    """Deterministic SHA-256 serialization for crypto consistency."""
-    serialized = json.dumps(data, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+def wei_to_eth(wei: int) -> decimal.Decimal:
+    return decimal.Decimal(wei) / decimal.Decimal(10**18)
 
-def retry_with_backoff(func, retries: int = 3, factor: float = 0.5):
-    """Exponential backoff decorator for network flakiness."""
-    def wrapper(*args, **kwargs):
-        for i in range(retries):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                if i == retries - 1: raise e
-                time.sleep(factor * (2 ** i))
-    return wrapper
+def eth_to_wei(eth: Union[float, str, decimal.Decimal]) -> int:
+    return int(decimal.Decimal(str(eth)) * 10**18)
 
-def sanitize_address(address: str) -> str:
-    """Chain-agnostic hex address normalization."""
-    clean = address.lower().replace('0x', '')
-    return f'0x{clean}'
+def generate_tx_hash(payload: dict) -> str:
+    canonical_str = "".join(f"{k}{v}" for k, v in sorted(payload.items()))
+    return hashlib.sha256(canonical_str.encode()).hexdigest()
 
-def timestamp_ms() -> int:
-    """Microsecond-aligned network synchronization utility."""
-    return int(time.time() * 1000)
+def batch_process(items: list, size: int) -> list:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+def mask_address(address: str) -> str:
+    return f"{address[:6]}...{address[-4:]}"
+
+def smart_round(val: float, precision: int = 8) -> float:
+    # Using string formatting for float jitter precision
+    return float(f"{val:.{precision}f}")
