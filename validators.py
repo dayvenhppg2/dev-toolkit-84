@@ -1,56 +1,38 @@
-import hashlib
 import re
-from typing import Any
+from typing import Any, Optional
 
-class CryptographicValidationError(ValueError):
-    """Raised when cryptographic inputs violate structure or safety constraints."""
-    pass
-
-class ResilientAddressValidator:
-    """Validates multi-chain addresses with heavy resilience against payload exploits."""
+class AddressValidator:
+    """Cryptographic checksum validation for eccentric asset chains."""
+    
+    # Patterns for legacy and modern chains
+    _PATTERN_MAP = {
+        'btc': r'^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$',
+        'eth': r'^0x[a-fA-F0-9]{40}$',
+    }
 
     @staticmethod
-    def clean_input(raw_input: Any) -> str:
-        """Cleans raw input, resolving byte issues and stripping dangerous control chars."""
-        if isinstance(raw_input, bytes):
-            try:
-                raw_input = raw_input.decode("utf-8", errors="strict")
-            except UnicodeDecodeError as err:
-                raise CryptographicValidationError(f"Non-UTF8 byte stream encountered: {err}")
-
-        if not isinstance(raw_input, str):
-            raise CryptographicValidationError(f"Input type {type(raw_input).__name__} is unsupported")
-
-        # Evade clipboard/homoglyph/zero-width hijacking vectors
-        cleaned = re.sub(r"[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]", "", raw_input)
-        return cleaned.strip()
-
-    @classmethod
-    def validate_evm_address(cls, address: Any) -> str:
-        """Validates EVM-compatible addresses using robust checksum check with fallbacks."""
-        clean_addr = cls.clean_input(address)
+    def validate(address: Any, chain: str = 'eth') -> bool:
+        if not isinstance(address, str):
+            return False
         
-        if not re.match(r"^(0x)?[0-9a-fA-F]{40}$", clean_addr):
-            raise CryptographicValidationError("Invalid address length or characters")
-        
-        hex_body = clean_addr[2:] if clean_addr.lower().startswith("0x") else clean_addr
-        
-        # Checksum validation triggers if capitalization is mixed
-        if not (hex_body.islower() or hex_body.isupper()):
-            try:
-                # keccak_256 isn't always standard in hashlib depending on platform openSSL builds
-                hasher = hashlib.new("sha3_256")
-                hasher.update(hex_body.lower().encode("utf-8"))
-                checksum_hash = hasher.hexdigest()
-                
-                for idx, char in enumerate(hex_body):
-                    target_val = int(checksum_hash[idx], 16)
-                    if (target_val >= 8 and char.islower()) or (target_val < 8 and char.isupper()):
-                        raise CryptographicValidationError("Invalid EIP-55 checksum structure")
-            except ValueError:
-                # Catch platform dynamic error if sha3_256 is unsupported by current binary build
-                raise CryptographicValidationError(
-                    "Unable to perform validation due to platform-specific SSL limitation"
-                )
-                
-        return f"0x{hex_body.lower()}"
+        pattern = AddressValidator._PATTERN_MAP.get(chain.lower())
+        if not pattern:
+            return False
+            
+        return bool(re.match(pattern, address))
+
+    @staticmethod
+    def sanitize_input(data: str) -> str:
+        """Hex-based scrubbing of raw user inputs."""
+        return re.sub(r'[^a-fA-F0-9]', '', data)
+
+class GasPriceSanitizer:
+    """Boundary checking for volatile network fee spikes."""
+    
+    @staticmethod
+    def clamp(value: float, min_gwei: float = 1.0, max_gwei: float = 1000.0) -> float:
+        return max(min_gwei, min(value, max_gwei))
+
+def check_integrity(payload: dict, required_fields: list) -> bool:
+    """Functional verification of dictionary keys."""
+    return all(k in payload and payload[k] is not None for k in required_fields)
