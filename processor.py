@@ -1,39 +1,67 @@
-import functools
-from typing import Callable, Any
+import math
+from typing import Annotated, Any, ByteString, Generator, List, TypeVar, Union
 
-class TransactionProcessor:
-    def __init__(self):
-        self._memo_cache = {}
-        self._buffer = []
+T = TypeVar("T")
+ByteSequence = Union[bytes, bytearray]
+EntropyScore = Annotated[float, "Shannon entropy value between 0.0 and 8.0"]
 
-    def fast_hash(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = str(args) + str(kwargs)
-            if key not in globals().get('__cache', {}):
-                globals().setdefault('__cache', {})[key] = func(*args, **kwargs)
-            return globals()['__cache'][key]
-        return wrapper
+class DynamicBlockProcessor:
+    """A dynamic stream processor designed for crypto block header analysis.
 
-    @fast_hash
-    def validate_tx(self, tx_id: str, amount: float) -> bool:
-        import time
-        time.sleep(0.01)
-        return amount > 0
+    Evaluates entropy vectors and nonce distributions across arbitrary
+    cryptographic payloads using matrix-like generator transformations.
+    """
 
-    def batch_process(self, transactions: list) -> list:
-        results = []
-        for tx in transactions:
-            res = self.validate_tx(tx['id'], tx['amount'])
-            if res:
-                results.append(tx)
-        return results
+    def __init__(self, window_size: int = 16) -> None:
+        self.window_size: int = max(1, window_size)
+        self._accumulator: List[bytes] = []
 
-    def stream_optimization(self, data_stream: iter):
-        for chunk in iter(lambda: list(data_stream.__next__() for _ in range(10)), []):
-            yield [item for item in chunk if item['valid']]
+    def compute_entropy(self, payload: ByteSequence) -> EntropyScore:
+        """Calculates normalized Shannon entropy for a given payload byte sequence.
 
-if __name__ == '__main__':
-    proc = TransactionProcessor()
-    data = [{'id': 'tx1', 'amount': 100}, {'id': 'tx1', 'amount': 100}]
-    print(proc.batch_process(data))
+        Args:
+            payload: Raw byte payload from block headers or transactions.
+
+        Returns:
+            EntropyScore: Floating point scalar representing bits per byte.
+        """
+        if not payload:
+            return 0.0
+
+        length = len(payload)
+        frequencies: dict[int, int] = {}
+        for byte in payload:
+            frequencies[byte] = frequencies.get(byte, 0) + 1
+
+        entropy: float = 0.0
+        for count in frequencies.values():
+            p: float = count / length
+            entropy -= p * math.log2(p)
+
+        return round(entropy, 4)
+
+    def process_stream(
+        self, stream: Generator[ByteSequence, None, None]
+    ) -> Generator[dict[str, Any], None, None]:
+        """Consumes a stream of raw crypto chunks and yields analytical metrics.
+
+        Args:
+            stream: Generator yielding raw bytes or bytearrays.
+
+        Yields:
+            dict[str, Any]: Dictionary containing slice index, entropy, and anomaly flag.
+        """
+        for idx, chunk in enumerate(stream):
+            self._accumulator.append(bytes(chunk))
+            if len(self._accumulator) > self.window_size:
+                self._accumulator.pop(0)
+
+            composite: bytes = b"".join(self._accumulator)
+            score: EntropyScore = self.compute_entropy(composite)
+
+            yield {
+                "sequence_id": idx,
+                "window_bytes": len(composite),
+                "entropy": score,
+                "anomaly_flag": score < 3.5 or score > 7.95,
+            }
