@@ -1,32 +1,32 @@
 import logging
-from logging.handlers import RotatingFileHandler
 import os
+from datetime import datetime
 
-def get_crypto_logger(name: str, log_file: str = 'dev-toolkit-84.log') -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    formatter = logging.Formatter(
-        '[%(asctime)s] | %(levelname)-8s | %(name)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+class CryptoLogger:
+    def __init__(self, name='dev-toolkit-84'):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        
+        formatter = logging.Formatter(
+            '[%(asctime)s] | %(levelname)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        ch = logging.StreamHandler()
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    
-    file_handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=10 * 1024 * 1024, 
-        backupCount=5,
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
+    def entry(self, level, msg, tags=None):
+        tag_str = f"[{'|'.join(tags)}] " if tags else ""
+        full_msg = f"{tag_str}{msg}"
+        getattr(self.logger, level.lower())(full_msg)
 
-    if not logger.handlers:
-        logger.addHandler(console_handler)
-        logger.addHandler(file_handler)
+    @staticmethod
+    def audit_trail(data, filename='audit.log'):
+        with open(filename, 'a') as f:
+            f.write(f"{datetime.utcnow().isoformat()}Z | {data}\n")
 
-    return logger
+def get_logger():
+    return CryptoLogger()
 
-# crypto-native singleton instance
-app_logger = get_crypto_logger('dev-toolkit-84')
+log = get_logger()
