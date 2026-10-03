@@ -1,67 +1,60 @@
-import math
-from typing import Annotated, Any, ByteString, Generator, List, TypeVar, Union
+import re
+from typing import Dict, Any, List, Generator, Callable
 
-T = TypeVar("T")
-ByteSequence = Union[bytes, bytearray]
-EntropyScore = Annotated[float, "Shannon entropy value between 0.0 and 8.0"]
+class CryptoValidationError(Exception):
+    """Raised when payload fails crypto payload sanity checks."""
+    pass
 
-class DynamicBlockProcessor:
-    """A dynamic stream processor designed for crypto block header analysis.
+def is_valid_address(addr: Any) -> bool:
+    return isinstance(addr, str) and bool(re.match(r"^0x[a-fA-F0-9]{40}$", addr))
 
-    Evaluates entropy vectors and nonce distributions across arbitrary
-    cryptographic payloads using matrix-like generator transformations.
-    """
+def is_valid_signature(sig: Any) -> bool:
+    return isinstance(sig, str) and bool(re.match(r"^0x[a-fA-F0-9]{130}$", sig))
 
-    def __init__(self, window_size: int = 16) -> None:
-        self.window_size: int = max(1, window_size)
-        self._accumulator: List[bytes] = []
+class TransactionProcessor:
+    def __init__(self, target_chain_id: int = 1, max_gas: int = 15_000_000):
+        self.target_chain_id = target_chain_id
+        self.max_gas = max_gas
+        self._rules: List[Callable[[Dict[str, Any]], None]] = [
+            self._check_addresses,
+            self._check_gas_and_value,
+            self._check_signature,
+        ]
 
-    def compute_entropy(self, payload: ByteSequence) -> EntropyScore:
-        """Calculates normalized Shannon entropy for a given payload byte sequence.
+    def _check_addresses(self, tx: Dict[str, Any]) -> None:
+        for field in ("to", "from"):
+            if field in tx and not is_valid_address(tx[field]):
+                raise CryptoValidationError(f"Invalid address for key '{field}': {tx[field]}")
 
-        Args:
-            payload: Raw byte payload from block headers or transactions.
+    def _check_gas_and_value(self, tx: Dict[str, Any]) -> None:
+        gas = tx.get("gas", 21000)
+        val = tx.get("value", 0)
+        chain = tx.get("chain_id", self.target_chain_id)
+        
+        if not isinstance(gas, int) or not (21000 <= gas <= self.max_gas):
+            raise CryptoValidationError(f"Gas limit {gas} outside valid window")
+        if not isinstance(val, int) or val < 0:
+            raise CryptoValidationError(f"Negative or non-integer value: {val}")
+        if chain != self.target_chain_id:
+            raise CryptoValidationError(f"Mismatch chain ID {chain}, expected {self.target_chain_id}")
 
-        Returns:
-            EntropyScore: Floating point scalar representing bits per byte.
-        """
-        if not payload:
-            return 0.0
+    def _check_signature(self, tx: Dict[str, Any]) -> None:
+        sig = tx.get("signature")
+        if sig is not None and not is_valid_signature(sig):
+            raise CryptoValidationError("Malformed ECDSA hex signature")
 
-        length = len(payload)
-        frequencies: dict[int, int] = {}
-        for byte in payload:
-            frequencies[byte] = frequencies.get(byte, 0) + 1
-
-        entropy: float = 0.0
-        for count in frequencies.values():
-            p: float = count / length
-            entropy -= p * math.log2(p)
-
-        return round(entropy, 4)
-
-    def process_stream(
-        self, stream: Generator[ByteSequence, None, None]
-    ) -> Generator[dict[str, Any], None, None]:
-        """Consumes a stream of raw crypto chunks and yields analytical metrics.
-
-        Args:
-            stream: Generator yielding raw bytes or bytearrays.
-
-        Yields:
-            dict[str, Any]: Dictionary containing slice index, entropy, and anomaly flag.
-        """
-        for idx, chunk in enumerate(stream):
-            self._accumulator.append(bytes(chunk))
-            if len(self._accumulator) > self.window_size:
-                self._accumulator.pop(0)
-
-            composite: bytes = b"".join(self._accumulator)
-            score: EntropyScore = self.compute_entropy(composite)
-
-            yield {
-                "sequence_id": idx,
-                "window_bytes": len(composite),
-                "entropy": score,
-                "anomaly_flag": score < 3.5 or score > 7.95,
-            }
+    def process_queue(self, incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        processed = []
+        for idx, payload in enumerate(incoming):
+            try:
+                if not isinstance(payload, dict):
+                    raise CryptoValidationError("Payload must be a dictionary object")
+                
+                # Execute dynamic validation rule pipeline
+                for rule in self._rules:
+                    rule(payload)
+                
+                processed.append({**payload, "status": "valid", "index": idx})
+            except CryptoValidationError as err:
+                processed.append({"index": idx, "status": "rejected", "reason": str(err)})
+        return processed
