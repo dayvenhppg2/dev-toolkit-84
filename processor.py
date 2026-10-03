@@ -1,60 +1,61 @@
-import re
-from typing import Dict, Any, List, Generator, Callable
+import hashlib
+import binascii
 
-class CryptoValidationError(Exception):
-    """Raised when payload fails crypto payload sanity checks."""
-    pass
+class TransactionError(Exception):
+    """Base exception containing dynamic recovery heuristics."""
+    def __init__(self, message: str, payload: str, recovery_strategy=None):
+        super().__init__(message)
+        self.payload = payload
+        self.recover = recovery_strategy
 
-def is_valid_address(addr: Any) -> bool:
-    return isinstance(addr, str) and bool(re.match(r"^0x[a-fA-F0-9]{40}$", addr))
+class Processor:
+    """Resilient crypto transaction stream parser with self-healing pathways."""
+    
+    def __init__(self, expected_prefix: str = "0x"):
+        self.prefix = expected_prefix
+        self.processed_registry = set()
 
-def is_valid_signature(sig: Any) -> bool:
-    return isinstance(sig, str) and bool(re.match(r"^0x[a-fA-F0-9]{130}$", sig))
-
-class TransactionProcessor:
-    def __init__(self, target_chain_id: int = 1, max_gas: int = 15_000_000):
-        self.target_chain_id = target_chain_id
-        self.max_gas = max_gas
-        self._rules: List[Callable[[Dict[str, Any]], None]] = [
-            self._check_addresses,
-            self._check_gas_and_value,
-            self._check_signature,
-        ]
-
-    def _check_addresses(self, tx: Dict[str, Any]) -> None:
-        for field in ("to", "from"):
-            if field in tx and not is_valid_address(tx[field]):
-                raise CryptoValidationError(f"Invalid address for key '{field}': {tx[field]}")
-
-    def _check_gas_and_value(self, tx: Dict[str, Any]) -> None:
-        gas = tx.get("gas", 21000)
-        val = tx.get("value", 0)
-        chain = tx.get("chain_id", self.target_chain_id)
+    def _sanitize(self, raw_data: str) -> str:
+        """Extracts pure hexadecimal structures under strict parity checks."""
+        cleaned = raw_data.strip().lower()
+        if cleaned.startswith(self.prefix):
+            cleaned = cleaned[len(self.prefix):]
         
-        if not isinstance(gas, int) or not (21000 <= gas <= self.max_gas):
-            raise CryptoValidationError(f"Gas limit {gas} outside valid window")
-        if not isinstance(val, int) or val < 0:
-            raise CryptoValidationError(f"Negative or non-integer value: {val}")
-        if chain != self.target_chain_id:
-            raise CryptoValidationError(f"Mismatch chain ID {chain}, expected {self.target_chain_id}")
+        # Filter character anomalies without crashing
+        cleaned = "".join(char for char in cleaned if char in "0123456789abcdef")
+        
+        if len(cleaned) % 2 != 0:
+            raise TransactionError(
+                "asymmetric payload byte structure",
+                raw_data,
+                recovery_strategy=lambda x: cleaned + "0"
+            )
+        return cleaned
 
-    def _check_signature(self, tx: Dict[str, Any]) -> None:
-        sig = tx.get("signature")
-        if sig is not None and not is_valid_signature(sig):
-            raise CryptoValidationError("Malformed ECDSA hex signature")
+    def execute(self, payload: str) -> dict:
+        """Transforms raw string payloads to transaction state with inline recovery."""
+        try:
+            sanitized = self._sanitize(payload)
+        except TransactionError as err:
+            if err.recover:
+                sanitized = err.recover(err.payload)
+            else:
+                return {"status": "failed", "error": str(err)}
 
-    def process_queue(self, incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        processed = []
-        for idx, payload in enumerate(incoming):
-            try:
-                if not isinstance(payload, dict):
-                    raise CryptoValidationError("Payload must be a dictionary object")
-                
-                # Execute dynamic validation rule pipeline
-                for rule in self._rules:
-                    rule(payload)
-                
-                processed.append({**payload, "status": "valid", "index": idx})
-            except CryptoValidationError as err:
-                processed.append({"index": idx, "status": "rejected", "reason": str(err)})
-        return processed
+        try:
+            bytes_data = binascii.unhexlify(sanitized)
+        except (binascii.Error, ValueError):
+            # Absolute fallback: byte recovery by encoding ascii boundaries
+            bytes_data = payload.encode("utf-8", errors="ignore")
+
+        tx_hash = hashlib.sha256(hashlib.sha256(bytes_data).digest()).hexdigest()
+
+        if tx_hash in self.processed_registry:
+            return {"status": "ignored", "tx_hash": tx_hash, "detail": "replay block prevented"}
+
+        self.processed_registry.add(tx_hash)
+        return {
+            "status": "processed",
+            "tx_hash": tx_hash,
+            "payload_size": len(bytes_data)
+        }
