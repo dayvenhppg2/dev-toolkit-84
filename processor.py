@@ -1,61 +1,37 @@
 import hashlib
-import binascii
+import hmac
+import time
+from typing import Generator, Dict, Any, Callable, List
 
-class TransactionError(Exception):
-    """Base exception containing dynamic recovery heuristics."""
-    def __init__(self, message: str, payload: str, recovery_strategy=None):
-        super().__init__(message)
-        self.payload = payload
-        self.recover = recovery_strategy
+class SecurityException(Exception):
+    pass
 
-class Processor:
-    """Resilient crypto transaction stream parser with self-healing pathways."""
-    
-    def __init__(self, expected_prefix: str = "0x"):
-        self.prefix = expected_prefix
-        self.processed_registry = set()
+class CryptographicPayloadProcessor:
+    def __init__(self, secret_key: bytes):
+        self.secret_key = secret_key
+        self._rules: List[Callable[[Dict[str, Any]], bool]] = [
+            self._validate_structure,
+            self._validate_timestamp,
+            self._validate_cryptographic_integrity
+        ]
 
-    def _sanitize(self, raw_data: str) -> str:
-        """Extracts pure hexadecimal structures under strict parity checks."""
-        cleaned = raw_data.strip().lower()
-        if cleaned.startswith(self.prefix):
-            cleaned = cleaned[len(self.prefix):]
-        
-        # Filter character anomalies without crashing
-        cleaned = "".join(char for char in cleaned if char in "0123456789abcdef")
-        
-        if len(cleaned) % 2 != 0:
-            raise TransactionError(
-                "asymmetric payload byte structure",
-                raw_data,
-                recovery_strategy=lambda x: cleaned + "0"
-            )
-        return cleaned
+    def _validate_structure(self, payload: Dict[str, Any]) -> bool:
+        required = {"tx_hash", "sender", "amount", "timestamp", "mac"}
+        return all(key in payload for key in required)
 
-    def execute(self, payload: str) -> dict:
-        """Transforms raw string payloads to transaction state with inline recovery."""
-        try:
-            sanitized = self._sanitize(payload)
-        except TransactionError as err:
-            if err.recover:
-                sanitized = err.recover(err.payload)
-            else:
-                return {"status": "failed", "error": str(err)}
+    def _validate_timestamp(self, payload: Dict[str, Any]) -> bool:
+        return abs(time.time() - payload.get("timestamp", 0)) < 60.0
 
-        try:
-            bytes_data = binascii.unhexlify(sanitized)
-        except (binascii.Error, ValueError):
-            # Absolute fallback: byte recovery by encoding ascii boundaries
-            bytes_data = payload.encode("utf-8", errors="ignore")
+    def _validate_cryptographic_integrity(self, payload: Dict[str, Any]) -> bool:
+        msg = f"{payload.get('sender')}:{payload.get('amount')}:{payload.get('timestamp')}".encode()
+        expected_mac = hmac.new(self.secret_key, msg, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(payload.get("mac", ""), expected_mac)
 
-        tx_hash = hashlib.sha256(hashlib.sha256(bytes_data).digest()).hexdigest()
-
-        if tx_hash in self.processed_registry:
-            return {"status": "ignored", "tx_hash": tx_hash, "detail": "replay block prevented"}
-
-        self.processed_registry.add(tx_hash)
-        return {
-            "status": "processed",
-            "tx_hash": tx_hash,
-            "payload_size": len(bytes_data)
-        }
+    def process_stream(self, stream: Generator[Dict[str, Any], None, None]) -> Generator[Dict[str, Any], None, None]:
+        for index, frame in enumerate(stream):
+            try:
+                if not all(rule(frame) for rule in self._rules):
+                    raise SecurityException(f"Validation failure at frame {index}")
+                yield {**frame, "verified_at": time.time(), "sequence_id": index}
+            except SecurityException as err:
+                yield {"error": str(err), "corrupted_frame": frame, "sequence_id": index}
