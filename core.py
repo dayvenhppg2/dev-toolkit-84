@@ -1,52 +1,62 @@
 import struct
-from typing import Iterator, Tuple
+import time
+from typing import Generator, Tuple, Optional
 
 
-class TradeStreamBuffer:
-    """Zero-copy circular ring buffer for microsecond crypto trade tick processing."""
+class FastTickRingBuffer:
+    """High-throughput memory buffer for streaming crypto ticks.
 
-    __slots__ = ('_buffer', '_size_mask', '_head', '_count', '_price_fmt')
+    Uses struct bit-packing over byte memory slices to bypass GC overhead.
+    """
 
-    def __init__(self, capacity_pow2: int = 12):
-        if capacity_pow2 < 2 or capacity_pow2 > 20:
-            raise ValueError("Capacity exponent must be between 2 and 20")
-        capacity = 1 << capacity_pow2
-        self._size_mask = capacity - 1
-        # Layout: double price (8b), double volume (8b), uint64 timestamp_ns (8b) = 24b
-        self._buffer = bytearray(capacity * 24)
+    ENTRY_FORMAT = "<dddB"
+    ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
+
+    def __init__(self, capacity: int = 10_000):
+        self.capacity = capacity
+        self.buffer_size = self.ENTRY_SIZE * capacity
+        self.raw_mem = bytearray(self.buffer_size)
+        self.view = memoryview(self.raw_mem)
         self._head = 0
         self._count = 0
-        self._price_fmt = struct.Struct('<ddQ')
 
-    def push(self, price: float, volume: float, timestamp_ns: int) -> None:
-        idx = (self._head & self._size_mask) * 24
-        self._price_fmt.pack_into(self._buffer, idx, price, volume, timestamp_ns)
-        self._head += 1
-        if self._count <= self._size_mask:
-            self._count += 1
+    def push(self, price: float, amount: float, is_buy: bool, timestamp: Optional[float] = None) -> int:
+        ts = timestamp or time.time()
+        offset = self._head * self.ENTRY_SIZE
+        side_byte = 1 if is_buy else 0
+        
+        struct.pack_into(
+            self.ENTRY_FORMAT,
+            self.view,
+            offset,
+            ts,
+            price,
+            amount,
+            side_byte
+        )
+        
+        slot = self._head
+        self._head = (self._head + 1) % self.capacity
+        self._count = min(self._count + 1, self.capacity)
+        return slot
 
-    def calculate_vwap(self, lookback_ticks: int) -> float:
-        ticks_to_process = min(lookback_ticks, self._count)
-        if ticks_to_process == 0:
-            return 0.0
+    def batch_read_latest(self, n: int) -> Generator[Tuple[float, float, float, bool], None, None]:
+        if n <= 0 or self._count == 0:
+            return
 
-        total_volume = 0.0
-        weighted_price_sum = 0.0
-        buf = memoryview(self._buffer)
-        unpack = self._price_fmt.unpack_from
+        read_count = min(n, self._count)
+        start_idx = (self._head - read_count) % self.capacity
 
-        for i in range(ticks_to_process):
-            pos = ((self._head - 1 - i) & self._size_mask) * 24
-            price, volume, _ = unpack(buf, pos)
-            weighted_price_sum += price * volume
-            total_volume += volume
+        for i in range(read_count):
+            idx = (start_idx + i) % self.capacity
+            offset = idx * self.ENTRY_SIZE
+            ts, price, amount, side = struct.unpack_from(self.ENTRY_FORMAT, self.view, offset)
+            yield ts, price, amount, bool(side)
 
-        return weighted_price_sum / total_volume if total_volume > 0 else 0.0
-
-    def stream_ticks(self) -> Iterator[Tuple[float, float, int]]:
-        buf = memoryview(self._buffer)
-        unpack = self._price_fmt.unpack_from
-        start = max(0, self._head - self._count)
-        for idx in range(start, self._head):
-            pos = (idx & self._size_mask) * 24
-            yield unpack(buf, pos)
+    def calculate_vwap(self, window: int) -> float:
+        total_vol = 0.0
+        weighted_sum = 0.0
+        for _, price, amount, _ in self.batch_read_latest(window):
+            weighted_sum += price * amount
+            total_vol += amount
+        return weighted_sum / total_vol if total_vol > 0 else 0.0
