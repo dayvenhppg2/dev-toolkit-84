@@ -1,62 +1,40 @@
-import struct
+import functools
 import time
-from typing import Generator, Tuple, Optional
+import collections
 
+class CryptoEngine:
+    def __init__(self, cache_size=1024):
+        self.cache_size = cache_size
+        self.history = collections.deque(maxlen=cache_size)
 
-class FastTickRingBuffer:
-    """High-throughput memory buffer for streaming crypto ticks.
+    def memoize_heavy_calc(func):
+        cache = {}
+        @functools.wraps(func)
+        def wrapper(*args):
+            key = hash(args)
+            if key not in cache:
+                cache[key] = func(*args)
+                if len(cache) > 2048:
+                    cache.clear()
+            return cache[key]
+        return wrapper
 
-    Uses struct bit-packing over byte memory slices to bypass GC overhead.
-    """
+    @memoize_heavy_calc
+    def compute_hash_sequence(self, seed: int, depth: int) -> int:
+        val = seed
+        for _ in range(depth):
+            val = ((val << 7) ^ (val >> 3)) & 0xFFFFFFFFFFFFFFFF
+            val = (val * 0x5bd1e995) & 0xFFFFFFFFFFFFFFFF
+        return val
 
-    ENTRY_FORMAT = "<dddB"
-    ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
+    def process_batch(self, inputs: list):
+        start = time.perf_counter()
+        results = [self.compute_hash_sequence(i, 1000) for i in inputs]
+        latency = time.perf_counter() - start
+        self.history.append({'time': latency, 'count': len(inputs)})
+        return results
 
-    def __init__(self, capacity: int = 10_000):
-        self.capacity = capacity
-        self.buffer_size = self.ENTRY_SIZE * capacity
-        self.raw_mem = bytearray(self.buffer_size)
-        self.view = memoryview(self.raw_mem)
-        self._head = 0
-        self._count = 0
-
-    def push(self, price: float, amount: float, is_buy: bool, timestamp: Optional[float] = None) -> int:
-        ts = timestamp or time.time()
-        offset = self._head * self.ENTRY_SIZE
-        side_byte = 1 if is_buy else 0
-        
-        struct.pack_into(
-            self.ENTRY_FORMAT,
-            self.view,
-            offset,
-            ts,
-            price,
-            amount,
-            side_byte
-        )
-        
-        slot = self._head
-        self._head = (self._head + 1) % self.capacity
-        self._count = min(self._count + 1, self.capacity)
-        return slot
-
-    def batch_read_latest(self, n: int) -> Generator[Tuple[float, float, float, bool], None, None]:
-        if n <= 0 or self._count == 0:
-            return
-
-        read_count = min(n, self._count)
-        start_idx = (self._head - read_count) % self.capacity
-
-        for i in range(read_count):
-            idx = (start_idx + i) % self.capacity
-            offset = idx * self.ENTRY_SIZE
-            ts, price, amount, side = struct.unpack_from(self.ENTRY_FORMAT, self.view, offset)
-            yield ts, price, amount, bool(side)
-
-    def calculate_vwap(self, window: int) -> float:
-        total_vol = 0.0
-        weighted_sum = 0.0
-        for _, price, amount, _ in self.batch_read_latest(window):
-            weighted_sum += price * amount
-            total_vol += amount
-        return weighted_sum / total_vol if total_vol > 0 else 0.0
+    @property
+    def optimization_stats(self):
+        if not self.history: return 0
+        return sum(h['time'] for h in self.history) / len(self.history)
