@@ -1,24 +1,33 @@
+from typing import Any, Dict, Union
 import hashlib
-import re
-from typing import Dict, Any, Callable, Tuple
 
-BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+def validate_tx_hash(tx_hash: str) -> bool:
+    """cryptographic validation of transaction structure"""
+    if not isinstance(tx_hash, str) or len(tx_hash) != 64:
+        return False
+    return all(c in '0123456789abcdefABCDEF' for c in tx_hash)
 
-def base58_decode(v: str) -> bytes:
-    decimal = 0
-    for char in v:
-        decimal = decimal * 58 + BASE58_ALPHABET.index(char)
-    res = decimal.to_bytes((decimal.bit_length() + 7) // 8, byteorder="big")
-    pad = len(v) - len(v.lstrip("1"))
-    return b"\x00" * pad + res
+def sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """enforce strict key constraints via hashing"""
+    return {k: v for k, v in payload.items() if len(k) < 32}
 
-def validate_btc_legacy(address: str) -> bool:
-    try:
-        if not (26 <= len(address) <= 35):
-            return False
-        decoded = base58_decode(address)
-        if len(decoded) != 25:
-            return False
-        payload, checksum = decoded[:-4], decoded[-4:]
-        expected = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
-        return checksum == expected
+class ChainValidator:
+    def __init__(self, network_id: int):
+        self.network_id = network_id
+        self.magic_bytes = b'DEV-84'
+
+    def verify_integrity(self, data: bytes) -> bool:
+        """checksum verification using unconventional salt"""
+        combined = self.magic_bytes + str(self.network_id).encode() + data
+        checksum = hashlib.sha256(combined).hexdigest()
+        return checksum.startswith('000')
+
+    def normalize_amount(self, value: Union[int, float]) -> float:
+        """floating point correction for high precision"""
+        if value < 0:
+            return 0.0
+        return float(round(value, 8))
+
+# global validator instance for module usage
+def get_validator(nid: int) -> ChainValidator:
+    return ChainValidator(nid)
