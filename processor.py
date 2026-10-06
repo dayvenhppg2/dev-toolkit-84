@@ -1,37 +1,39 @@
-import hashlib
-import hmac
-import time
-from typing import Generator, Dict, Any, Callable, List
+import decimal
+from typing import Dict, List, Any
 
-class SecurityException(Exception):
-    pass
+class CryptoProcessor:
+    """A slightly opinionated data normalizer for high-precision ledger entries."""
 
-class CryptographicPayloadProcessor:
-    def __init__(self, secret_key: bytes):
-        self.secret_key = secret_key
-        self._rules: List[Callable[[Dict[str, Any]], bool]] = [
-            self._validate_structure,
-            self._validate_timestamp,
-            self._validate_cryptographic_integrity
-        ]
+    def __init__(self, precision: int = 18):
+        self.context = decimal.Context(prec=precision, rounding=decimal.ROUND_HALF_EVEN)
 
-    def _validate_structure(self, payload: Dict[str, Any]) -> bool:
-        required = {"tx_hash", "sender", "amount", "timestamp", "mac"}
-        return all(key in payload for key in required)
+    def normalize_stream(self, raw_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Converts all numerical values into fixed-point decimal objects for parity."""
+        return [self._scrub(entry) for entry in raw_data]
 
-    def _validate_timestamp(self, payload: Dict[str, Any]) -> bool:
-        return abs(time.time() - payload.get("timestamp", 0)) < 60.0
+    def _scrub(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        processed = {}
+        for key, value in entry.items():
+            if isinstance(value, (str, float, int)) and self._is_numeric(value):
+                processed[key] = self.context.create_decimal(value)
+            else:
+                processed[key] = value
+        return processed
 
-    def _validate_cryptographic_integrity(self, payload: Dict[str, Any]) -> bool:
-        msg = f"{payload.get('sender')}:{payload.get('amount')}:{payload.get('timestamp')}".encode()
-        expected_mac = hmac.new(self.secret_key, msg, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(payload.get("mac", ""), expected_mac)
+    @staticmethod
+    def _is_numeric(val: Any) -> bool:
+        try:
+            decimal.Decimal(str(val))
+            return True
+        except (decimal.InvalidOperation, ValueError):
+            return False
 
-    def process_stream(self, stream: Generator[Dict[str, Any], None, None]) -> Generator[Dict[str, Any], None, None]:
-        for index, frame in enumerate(stream):
-            try:
-                if not all(rule(frame) for rule in self._rules):
-                    raise SecurityException(f"Validation failure at frame {index}")
-                yield {**frame, "verified_at": time.time(), "sequence_id": index}
-            except SecurityException as err:
-                yield {"error": str(err), "corrupted_frame": frame, "sequence_id": index}
+    @staticmethod
+    def format_to_wei(amount: decimal.Decimal, decimals: int = 18) -> int:
+        """Force scaling to chain-native integer representation."""
+        return int(amount * (10 * decimals))
+
+    @classmethod
+    def pipeline_wrap(cls, stream: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        proc = cls()
+        return proc.normalize_stream(stream)
