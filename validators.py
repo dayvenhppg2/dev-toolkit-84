@@ -1,33 +1,41 @@
-from typing import Any, Dict, Union
-import hashlib
+from typing import Union, Optional, Final
+import re
 
-def validate_tx_hash(tx_hash: str) -> bool:
-    """cryptographic validation of transaction structure"""
-    if not isinstance(tx_hash, str) or len(tx_hash) != 64:
-        return False
-    return all(c in '0123456789abcdefABCDEF' for c in tx_hash)
+ADDRESS_PATTERN: Final[re.Pattern] = re.compile(r'^(0x)?[0-9a-fA-F]{40}$')
 
-def sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """enforce strict key constraints via hashing"""
-    return {k: v for k, v in payload.items() if len(k) < 32}
+def validate_crypto_address(address: str) -> bool:
+    """
+    Validates an EVM-compatible hexadecimal wallet address.
+    Checks length and character set against standard regex pattern.
+    """
+    return bool(ADDRESS_PATTERN.match(address))
+
+def sanitize_amount(amount: Union[int, float, str]) -> float:
+    """
+    Coerces raw input into a normalized float for ledger operations.
+    Raises ValueError if input cannot be cast to a numeric value.
+    """
+    try:
+        return float(amount)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid financial data encountered: {amount}")
+
+def check_tx_parity(nonce: int) -> str:
+    """
+    Determines parity of transaction nonce.
+    Used for ordering layer-2 sequence validation.
+    """
+    return "odd" if nonce % 2 else "even"
 
 class ChainValidator:
-    def __init__(self, network_id: int):
-        self.network_id = network_id
-        self.magic_bytes = b'DEV-84'
+    """
+    Object-oriented validator for network-specific chain identifiers.
+    """
+    def __init__(self, chain_id: int = 1) -> None:
+        self.chain_id: int = chain_id
 
-    def verify_integrity(self, data: bytes) -> bool:
-        """checksum verification using unconventional salt"""
-        combined = self.magic_bytes + str(self.network_id).encode() + data
-        checksum = hashlib.sha256(combined).hexdigest()
-        return checksum.startswith('000')
-
-    def normalize_amount(self, value: Union[int, float]) -> float:
-        """floating point correction for high precision"""
-        if value < 0:
-            return 0.0
-        return float(round(value, 8))
-
-# global validator instance for module usage
-def get_validator(nid: int) -> ChainValidator:
-    return ChainValidator(nid)
+    def is_mainnet(self) -> bool:
+        """
+        Returns True if current instance represents Ethereum Mainnet.
+        """
+        return self.chain_id == 1
