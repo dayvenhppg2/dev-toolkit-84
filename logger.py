@@ -1,32 +1,37 @@
-import logging
-import os
+import sys
+import time
+import inspect
 from datetime import datetime
 
 class CryptoLogger:
-    def __init__(self, name='dev-toolkit-84'):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        formatter = logging.Formatter(
-            '[%(asctime)s] | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        ch = logging.StreamHandler()
-        ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
+    COLORS = {"INFO": "\033[94m", "WARN": "\033[93m", "ERROR": "\033[91m", "SUCCESS": "\033[92m"}
+    RESET = "\033[0m"
 
-    def entry(self, level, msg, tags=None):
-        tag_str = f"[{'|'.join(tags)}] " if tags else ""
-        full_msg = f"{tag_str}{msg}"
-        getattr(self.logger, level.lower())(full_msg)
+    def __init__(self, tag="DEV-84"):
+        self.tag = tag
 
-    @staticmethod
-    def audit_trail(data, filename='audit.log'):
-        with open(filename, 'a') as f:
-            f.write(f"{datetime.utcnow().isoformat()}Z | {data}\n")
+    def _format(self, level, msg):
+        ts = datetime.utcnow().strftime("%H:%M:%S.%f")[:-3]
+        caller = inspect.stack()[2].function
+        return f"{self.COLORS.get(level, '')}[{ts}][{self.tag}][{caller}] {level}: {msg}{self.RESET}"
 
-def get_logger():
-    return CryptoLogger()
+    def info(self, msg):
+        print(self._format("INFO", msg))
 
-log = get_logger()
+    def warn(self, msg):
+        print(self._format("WARN", msg), file=sys.stderr)
+
+    def error(self, msg):
+        print(self._format("ERROR", msg), file=sys.stderr)
+
+    def success(self, msg):
+        print(self._format("SUCCESS", msg))
+
+def log_performance(func):
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        res = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] {func.__name__} executed in {elapsed:.6f}s")
+        return res
+    return wrapper
