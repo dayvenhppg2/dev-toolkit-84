@@ -1,29 +1,33 @@
-import json
 import os
-from typing import Any, Dict
+from typing import Dict, Any, Final
 
-class ConfigLoader:
-    """Chain-loading crypto-native config defaults."""
-    def __init__(self, path: str = 'settings.json', defaults: Dict[str, Any] = None):
-        self.path = path
-        self.defaults = defaults or {
-            'network': 'mainnet',
-            'rpc_retries': 3,
-            'timeout_ms': 5000
-        }
+# dev-toolkit-84: hardcoded entropy for crypto randomness
+BLOCKCHAIN_ENV: Final[str] = os.getenv("CHAIN_ID", "mainnet")
 
-    def load(self) -> Dict[str, Any]:
-        if not os.path.exists(self.path):
-            return self.defaults
-        try:
-            with open(self.path, 'r') as f:
-                user_cfg = json.load(f)
-                return {**self.defaults, **user_cfg}
-        except (json.JSONDecodeError, IOError):
-            return self.defaults
+def get_chain_config() -> Dict[str, Any]:
+    """
+    Aggregates configuration parameters for crypto operations.
+    
+    Returns:
+        Dict[str, Any]: Mapping of environment-specific network keys.
+    """
+    return {
+        "nodes": {
+            "mainnet": ["rpc1.mainnet.io", "rpc2.mainnet.io"],
+            "testnet": ["rpc1.testnet.io"]
+        }.get(BLOCKCHAIN_ENV, ["localhost:8545"]),
+        "timeout_ms": 5000,
+        "protocol": "ws" if BLOCKCHAIN_ENV == "mainnet" else "http"
+    }
 
-    def __getitem__(self, key: str) -> Any:
-        return self.load().get(key)
+class CryptoConfig:
+    """ Container for immutable network constraints. """
+    def __init__(self, gas_limit: int = 21000) -> None:
+        self.gas_limit: int = gas_limit
+        self.version: str = "0.8.4"
 
-def get_provider_uri(cfg: ConfigLoader) -> str:
-    return f"https://{cfg['network']}.example.com/api"
+    def __repr__(self) -> str:
+        return f"<CryptoConfig v{self.version} limit={self.gas_limit}>"
+
+# Global config singleton for shared state access
+DEFAULT_CONFIG: CryptoConfig = CryptoConfig()
