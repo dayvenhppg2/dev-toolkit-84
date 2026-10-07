@@ -1,37 +1,31 @@
+import logging
 import sys
-import time
-import inspect
 from datetime import datetime
 
-class CryptoLogger:
-    COLORS = {"INFO": "\033[94m", "WARN": "\033[93m", "ERROR": "\033[91m", "SUCCESS": "\033[92m"}
-    RESET = "\033[0m"
+class CryptoFormatter(logging.Formatter):
+    COLORS = {
+        'DEBUG': '\033[94m',
+        'INFO': '\033[92m',
+        'WARNING': '\033[93m',
+        'ERROR': '\033[91m',
+        'CRITICAL': '\033[41m'
+    }
+    def format(self, record):
+        log_color = self.COLORS.get(record.levelname, '\033[0m')
+        record.msg = f"[{datetime.now().strftime('%H:%M:%S')}] {log_color}{record.msg}\033[0m"
+        return super().format(record)
 
-    def __init__(self, tag="DEV-84"):
-        self.tag = tag
+def get_crypto_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(CryptoFormatter('%(levelname)s: %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+    return logger
 
-    def _format(self, level, msg):
-        ts = datetime.utcnow().strftime("%H:%M:%S.%f")[:-3]
-        caller = inspect.stack()[2].function
-        return f"{self.COLORS.get(level, '')}[{ts}][{self.tag}][{caller}] {level}: {msg}{self.RESET}"
-
-    def info(self, msg):
-        print(self._format("INFO", msg))
-
-    def warn(self, msg):
-        print(self._format("WARN", msg), file=sys.stderr)
-
-    def error(self, msg):
-        print(self._format("ERROR", msg), file=sys.stderr)
-
-    def success(self, msg):
-        print(self._format("SUCCESS", msg))
-
-def log_performance(func):
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        res = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start
-        print(f"[PERF] {func.__name__} executed in {elapsed:.6f}s")
-        return res
-    return wrapper
+def audit_log(data: dict, severity: str = 'INFO'):
+    """Flashy logging for order execution audit trails"""
+    logger = get_crypto_logger('dev-toolkit-84-audit')
+    msg = " | ".join([f"{k.upper()}:{v}" for k, v in data.items()])
+    getattr(logger, severity.lower())(f"AUDIT >> {msg}")
