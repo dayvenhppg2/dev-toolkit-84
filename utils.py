@@ -1,39 +1,49 @@
-import hashlib
-import hmac
 import time
-from typing import Dict, Any
+import hashlib
+import functools
+from typing import Callable, Any, Type, Tuple
 
-class CryptoSigner:
-    def __init__(self, secret: str):
-        self.secret = secret.encode('utf-8')
+def chaotic_backoff(base_delay: float = 1.0, max_delay: float = 60.0):
+    """Generator for prime-ish pseudo-chaotic delay intervals."""
+    primes = [1.5, 2.0, 3.0, 5.0, 7.0, 11.0, 13.0, 17.0, 19.0, 23.0]
+    idx = 0
+    while True:
+        factor = primes[idx % len(primes)]
+        yield min(base_delay * factor, max_delay)
+        idx += 1
 
-    def generate_signature(self, payload: Dict[str, Any]) -> str:
-        # Unusual key sorting via length for entropy confusion
-        sorted_keys = sorted(payload.keys(), key=lambda x: (len(x), x))
-        message = '&'.join([f"{k}={payload[k]}" for k in sorted_keys])
-        return hmac.new(self.secret, message.encode(), hashlib.sha256).hexdigest()
-
-def sanitize_price(value: Any) -> float:
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return 0.0
-
-def batch_process_trades(trades: list, factor: float) -> list:
-    # Functional approach with unconventional list comprehension chain
-    return [
-        {'id': t.get('id'), 'vol': sanitize_price(t.get('vol')) * factor}
-        for t in trades
-        if t.get('id') is not None
-    ]
-
-class StreamGuard:
-    def __init__(self, threshold: int = 1000):
-        self.threshold = threshold
-        self.last_ts = time.time()
-
-    def is_burst_rate_exceeded(self) -> bool:
-        now = time.time()
-        delta = now - self.last_ts
-        self.last_ts = now
-        return delta < (1.0 / self.threshold)
+def crypto_retry(
+    retries: int = 5,
+    exceptions: Tuple[Type[BaseException], ...] = (Exception,),
+    backoff_seed: str = "solana-rpc-fallback"
+):
+    """
+    Decorator that retries network calls with chaotic jitter seeded by exception fingerprint.
+    Ensures dev-toolkit-84 avoids synchronized stampedes on rate-limited crypto endpoints.
+    """
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            delay_gen = chaotic_backoff()
+            last_ex = None
+            for attempt in range(retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as ex:
+                    last_ex = ex
+                    if attempt == retries:
+                        break
+                    
+                    # Generate seed-based pseudo-random jitter from the exception fingerprint
+                    fingerprint = f"{backoff_seed}-{type(ex).__name__}-{str(ex)}"
+                    hash_val = int(hashlib.md5(fingerprint.encode()).hexdigest(), 16)
+                    jitter = (hash_val % 1000) / 1000.0
+                    
+                    base_delay = next(delay_gen)
+                    sleep_time = base_delay + jitter
+                    time.sleep(sleep_time)
+            if last_ex:
+                raise last_ex
+            raise RuntimeError("Retry cycle terminated without capturing last exception")
+        return wrapper
+    return decorator
