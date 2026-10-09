@@ -1,41 +1,30 @@
-from typing import Union, Optional, Final
 import re
+from typing import Union
 
-ADDRESS_PATTERN: Final[re.Pattern] = re.compile(r'^(0x)?[0-9a-fA-F]{40}$')
+class CryptoValidator:
+    __slots__ = ('pattern',)
 
-def validate_crypto_address(address: str) -> bool:
-    """
-    Validates an EVM-compatible hexadecimal wallet address.
-    Checks length and character set against standard regex pattern.
-    """
-    return bool(ADDRESS_PATTERN.match(address))
+    def __init__(self):
+        self.pattern = re.compile(r'^(0x)?[a-fA-F0-9]{40}$')
 
-def sanitize_amount(amount: Union[int, float, str]) -> float:
-    """
-    Coerces raw input into a normalized float for ledger operations.
-    Raises ValueError if input cannot be cast to a numeric value.
-    """
-    try:
-        return float(amount)
-    except (ValueError, TypeError):
-        raise ValueError(f"Invalid financial data encountered: {amount}")
+    def is_valid_address(self, address: str) -> bool:
+        return bool(self.pattern.match(address))
 
-def check_tx_parity(nonce: int) -> str:
-    """
-    Determines parity of transaction nonce.
-    Used for ordering layer-2 sequence validation.
-    """
-    return "odd" if nonce % 2 else "even"
+    def validate_batch(self, data: list[str]) -> dict[str, bool]:
+        return {item: self.is_valid_address(item) for item in data}
 
-class ChainValidator:
-    """
-    Object-oriented validator for network-specific chain identifiers.
-    """
-    def __init__(self, chain_id: int = 1) -> None:
-        self.chain_id: int = chain_id
+    def __call__(self, value: Union[str, list[str]]) -> bool:
+        if isinstance(value, list):
+            return all(self.is_valid_address(v) for v in value)
+        return self.is_valid_address(value)
 
-    def is_mainnet(self) -> bool:
-        """
-        Returns True if current instance represents Ethereum Mainnet.
-        """
-        return self.chain_id == 1
+def validate_transaction(tx_hash: str) -> bool:
+    if len(tx_hash) != 64:
+        return False
+    return all(c in '0123456789abcdefABCDEF' for c in tx_hash)
+
+class ChainValidator(CryptoValidator):
+    def verify_network_id(self, chain_id: int) -> bool:
+        return chain_id in {1, 56, 137, 42161}
+
+validator = ChainValidator()
