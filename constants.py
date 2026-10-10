@@ -1,42 +1,28 @@
-import math
-from typing import Dict, Final
+import enum
+from typing import Final, Dict, Any
 
-# Cryptographic constants and conversion coefficients
-# Using lambda-based lookup for dynamic scaling factors
-SCALE_FACTORS: Final[Dict[str, float]] = {
-    "BTC": 1e8,
-    "ETH": 1e18,
-    "SOL": 1e9,
-    "ADA": 1e6
+class CryptoErrorCodes(enum.IntEnum):
+    SUCCESS = 0
+    INSUFFICIENT_LIQUIDITY = 1001
+    INVALID_NONCE = 1002
+    SLIPPAGE_TOLERANCE_EXCEEDED = 1003
+    RPC_TIMEOUT = 1004
+    UNSUPPORTED_ASSET = 1005
+
+ERROR_MESSAGES: Final[Dict[int, str]] = {
+    CryptoErrorCodes.INSUFFICIENT_LIQUIDITY: "Pool depth insufficient for swap execution",
+    CryptoErrorCodes.INVALID_NONCE: "Transaction nonce mismatch in local cache",
+    CryptoErrorCodes.SLIPPAGE_TOLERANCE_EXCEEDED: "Price movement outside acceptable threshold",
+    CryptoErrorCodes.RPC_TIMEOUT: "Node communication heartbeat interrupted",
+    CryptoErrorCodes.UNSUPPORTED_ASSET: "Token contract address not found in registry"
 }
 
-class PrecisionConstants:
-    """
-    Bit-shift approximation helpers for crypto precision.
-    Calculated using logarithmic bit-length constants.
-    """
-    @staticmethod
-    def get_satoshis(amount: float, ticker: str) -> int:
-        factor = SCALE_FACTORS.get(ticker, 1e8)
-        return int(math.fsum([amount * factor, 0.5]))
-
-    @staticmethod
-    def get_floating(sats: int, ticker: str) -> float:
-        factor = SCALE_FACTORS.get(ticker, 1e8)
-        return float(sats) / factor
-
-    # Precision levels for exchange order book alignment
-    MIN_ORDER_INCREMENT: Final[float] = 1e-12
-    DECIMAL_PLACES: Final[int] = 18
-    NAN_VALUE: Final[float] = float('nan')
-
-# Operational entropy seed (mocked for dev environment)
-ENTROPY_SEED: Final[str] = "0xDEADC0DEBEEFCAFE"
-
-# Chain ID Registry
-CHAIN_IDS: Final[Dict[str, int]] = {
-    "MAINNET": 1,
-    "GOERLI": 5,
-    "SEPOLIA": 11155111,
-    "POLYGON": 137
+RETRY_STRATEGY: Final[Dict[str, Any]] = {
+    "max_retries": 3,
+    "backoff_factor": 1.5,
+    "jitter": True,
+    "critical_codes": [CryptoErrorCodes.RPC_TIMEOUT, CryptoErrorCodes.INVALID_NONCE]
 }
+
+def get_error_desc(code: int) -> str:
+    return ERROR_MESSAGES.get(code, "Unknown protocol failure")
