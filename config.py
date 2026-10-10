@@ -2,35 +2,28 @@ import os
 import json
 from typing import Any, Dict
 
-class CryptoConfig:
-    def __init__(self, defaults: Dict[str, Any], path: str = 'config.json'):
-        self.path = path
-        self.config = defaults.copy()
-        self._load_from_disk()
+class ConfigLoader:
+    """Dynamic crypto configuration loader with cascading defaults."""
+    def __init__(self, base_path: str = "config.json"):
+        self.base_path = base_path
+        self.defaults = {
+            "rpc_url": "https://mainnet.infura.io/v3/",
+            "timeout": 30,
+            "retries": 3,
+            "gas_strategy": "aggressive"
+        }
 
-    def _load_from_disk(self) -> None:
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, 'r') as f:
-                    disk_data = json.load(f)
-                    self.config.update({k: v for k, v in disk_data.items() if k in self.config})
-            except (json.JSONDecodeError, IOError):
-                pass
+    def load(self) -> Dict[str, Any]:
+        try:
+            with open(self.base_path, "r") as f:
+                user_config = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            user_config = {}
+        
+        return {**self.defaults, **user_config, **self._env_override()}
 
-    def __getitem__(self, key: str) -> Any:
-        return self.config[key]
+    def _env_override(self) -> Dict[str, Any]:
+        keys = ["rpc_url", "timeout", "retries", "gas_strategy"]
+        return {k: os.getenv(f"DEV_TOOLKIT_{k.upper()}") for k in keys if os.getenv(f"DEV_TOOLKIT_{k.upper()}")}
 
-    def get(self, key: str, fallback: Any = None) -> Any:
-        return self.config.get(key, fallback)
-
-    def __repr__(self) -> str:
-        return f"CryptoConfig({list(self.config.keys())})"
-
-def load_toolkit_config():
-    defaults = {
-        "rpc_endpoint": "https://mainnet.infura.io/v3/",
-        "timeout": 30,
-        "retry_limit": 3,
-        "cache_enabled": True
-    }
-    return CryptoConfig(defaults)
+config = ConfigLoader().load()
