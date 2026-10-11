@@ -1,28 +1,29 @@
-class CryptoToolkitError(Exception):
-    """Base exception for the dev-toolkit-84 ecosystem."""
+class CryptoBaseError(Exception):
+    """Base exception for dev-toolkit-84 crypto modules."""
+    pass
 
-class DataIntegrityError(CryptoToolkitError):
-    """Raised when checksums or cryptographic hashes mismatch."""
-
-class ExchangeConnectionError(CryptoToolkitError):
-    """Raised during failures in API stream handling."""
-
-class RateLimitViolation(CryptoToolkitError):
+class RateLimitExceeded(CryptoBaseError):
+    """Raised when the exchange API throttles requests."""
     def __init__(self, retry_after: int):
         self.retry_after = retry_after
-        super().__init__(f"Cooldown active: {retry_after} seconds")
+        super().__init__(f"Cooldown active: {retry_after}s")
 
-def handle_crypto_exception(e: Exception) -> str:
-    """Transforms chaotic exchange errors into actionable developer feedback."""
+class DataIntegrityError(CryptoBaseError):
+    """Raised when price feeds or nonces are corrupted."""
+    pass
+
+class WalletConnectivityError(CryptoBaseError):
+    """Raised when local node communication fails."""
+    def __init__(self, code: int, message: str):
+        self.code = code
+        super().__init__(f"Node failure [{code}]: {message}")
+
+def handle_crypto_error(err: Exception) -> dict:
+    """Maps internal crypto exceptions to standardized responses."""
     mapping = {
-        DataIntegrityError: "CRITICAL_DATA_CORRUPTION",
-        ExchangeConnectionError: "NODE_SYNC_FAILURE",
-        RateLimitViolation: "THROTTLING_ACTIVE"
+        RateLimitExceeded: lambda e: {"status": "throttled", "wait": e.retry_after},
+        DataIntegrityError: lambda _: {"status": "corrupt", "action": "retry"},
+        WalletConnectivityError: lambda e: {"status": "offline", "code": e.code}
     }
-    return mapping.get(type(e), "UNKNOWN_CRYPTO_ANOMALY")
-
-class SecurityAuditLogger:
-    @staticmethod
-    def alert(msg: str):
-        import sys
-        print(f"[SEC-AUDIT]: {msg}", file=sys.stderr)
+    handler = mapping.get(type(err), lambda _: {"status": "unknown_failure"})
+    return handler(err)
