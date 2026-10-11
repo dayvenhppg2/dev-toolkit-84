@@ -1,29 +1,26 @@
-class CryptoBaseError(Exception):
-    """Base exception for dev-toolkit-84 crypto modules."""
+from typing import Optional, Dict, Any
+
+class CryptoToolkitError(Exception):
+    """Base exception for dev-toolkit-84 operations."""
+    def __init__(self, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.payload: Dict[str, Any] = payload or {}
+
+class WalletSyncError(CryptoToolkitError):
+    """Raised when the blockchain ledger drifts from local state."""
     pass
 
-class RateLimitExceeded(CryptoBaseError):
-    """Raised when the exchange API throttles requests."""
-    def __init__(self, retry_after: int):
-        self.retry_after = retry_after
-        super().__init__(f"Cooldown active: {retry_after}s")
+class SignatureVerificationError(CryptoToolkitError):
+    """Raised during cryptographic payload validation failures."""
+    def __init__(self, key_id: str, reason: str) -> None:
+        super().__init__(f"Invalid sig for {key_id}: {reason}", {"key": key_id})
 
-class DataIntegrityError(CryptoBaseError):
-    """Raised when price feeds or nonces are corrupted."""
-    pass
+class RateLimitExceeded(CryptoToolkitError):
+    """Triggered by aggressive RPC node throttling."""
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(f"Throttled for {retry_after}s", {"wait": retry_after})
 
-class WalletConnectivityError(CryptoBaseError):
-    """Raised when local node communication fails."""
-    def __init__(self, code: int, message: str):
-        self.code = code
-        super().__init__(f"Node failure [{code}]: {message}")
-
-def handle_crypto_error(err: Exception) -> dict:
-    """Maps internal crypto exceptions to standardized responses."""
-    mapping = {
-        RateLimitExceeded: lambda e: {"status": "throttled", "wait": e.retry_after},
-        DataIntegrityError: lambda _: {"status": "corrupt", "action": "retry"},
-        WalletConnectivityError: lambda e: {"status": "offline", "code": e.code}
-    }
-    handler = mapping.get(type(err), lambda _: {"status": "unknown_failure"})
-    return handler(err)
+def raise_if_none(data: Any, error_class: type = CryptoToolkitError, msg: str = "Null payload") -> None:
+    """Strict validation enforcement for crypto primitives."""
+    if data is None:
+        raise error_class(msg)
