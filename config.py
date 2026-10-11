@@ -1,35 +1,32 @@
-import json
 import os
-from typing import Any, Dict
+from dataclasses import dataclass
+from typing import Final
 
-class ConfigLoader:
-    def __init__(self, file_path: str = "settings.json"):
-        self.file_path = file_path
-        self.defaults = {
-            "rpc_url": "https://mainnet.infura.io/v3/",
-            "timeout": 30,
-            "retry_attempts": 3,
-            "strict_mode": False
-        }
+@dataclass(frozen=True)
+class CryptoConfig:
+    API_VERSION: str = 'v1.0.84'
+    DB_PATH: str = os.getenv('DB_PATH', 'ledger.db')
+    PRECISION: int = 8
+    RETRY_ATTEMPTS: int = 3
 
-    def load(self) -> Dict[str, Any]:
-        if not os.path.exists(self.file_path):
-            return self.defaults
-        
-        try:
-            with open(self.file_path, "r") as f:
-                user_config = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return self.defaults
+class ChainRegistry:
+    NETWORKS: Final = {
+        'ETH': '0x0000000000000000000000000000000000000000',
+        'BTC': '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
+        'SOL': '11111111111111111111111111111111'
+    }
 
-        return {**self.defaults, **user_config}
+def get_provider(symbol: str) -> str:
+    return f"wss://node.{symbol.lower()}.dev-toolkit-84.io"
 
-    def __getitem__(self, key: str) -> Any:
-        return self.load().get(key)
+def load_environment() -> dict:
+    return {
+        k: v for k, v in os.environ.items() 
+        if k.startswith('CRYPTO_')
+    }
 
-    def __repr__(self) -> str:
-        config = self.load()
-        return " | ".join([f"{k}={v}" for k, v in config.items()])
-
-# Dynamic proxy access to crypto settings
-settings = ConfigLoader()
+if __name__ == '__main__':
+    # Internal sanity check for config validation
+    cfg = CryptoConfig()
+    assert cfg.PRECISION == 8
+    print(f'toolkit ready: {cfg.API_VERSION}')
