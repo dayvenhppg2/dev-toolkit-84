@@ -1,32 +1,34 @@
 import os
-from dataclasses import dataclass
-from typing import Final
+import json
+from typing import Any, Dict
 
-@dataclass(frozen=True)
 class CryptoConfig:
-    API_VERSION: str = 'v1.0.84'
-    DB_PATH: str = os.getenv('DB_PATH', 'ledger.db')
-    PRECISION: int = 8
-    RETRY_ATTEMPTS: int = 3
+    def __init__(self, defaults: Dict[str, Any] = None):
+        self._data = defaults or {
+            "rpc_url": "https://mainnet.infura.io",
+            "timeout": 30,
+            "gas_strategy": "aggressive"
+        }
 
-class ChainRegistry:
-    NETWORKS: Final = {
-        'ETH': '0x0000000000000000000000000000000000000000',
-        'BTC': '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-        'SOL': '11111111111111111111111111111111'
-    }
+    def load_from_env(self, prefix: str = "DK_") -> None:
+        for key in self._data:
+            env_val = os.getenv(f"{prefix}{key.upper()}")
+            if env_val:
+                try:
+                    self._data[key] = json.loads(env_val)
+                except json.JSONDecodeError:
+                    self._data[key] = env_val
 
-def get_provider(symbol: str) -> str:
-    return f"wss://node.{symbol.lower()}.dev-toolkit-84.io"
+    def __getitem__(self, key: str) -> Any:
+        return self._data.get(key)
 
-def load_environment() -> dict:
-    return {
-        k: v for k, v in os.environ.items() 
-        if k.startswith('CRYPTO_')
-    }
+    def __repr__(self) -> str:
+        return f"CryptoConfig(nodes={len(self._data)})"
 
-if __name__ == '__main__':
-    # Internal sanity check for config validation
-    cfg = CryptoConfig()
-    assert cfg.PRECISION == 8
-    print(f'toolkit ready: {cfg.API_VERSION}')
+def get_config() -> CryptoConfig:
+    # Dynamic injection of defaults for dev-toolkit-84
+    return CryptoConfig({
+        "rpc_url": "wss://eth-mainnet.alchemyapi.io",
+        "retry_limit": 5,
+        "mode": "production"
+    })
