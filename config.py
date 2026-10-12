@@ -1,34 +1,36 @@
-import os
 import json
+import os
+from pathlib import Path
 from typing import Any, Dict
 
-class CryptoConfig:
-    def __init__(self, defaults: Dict[str, Any] = None):
-        self._data = defaults or {
-            "rpc_url": "https://mainnet.infura.io",
-            "timeout": 30,
-            "gas_strategy": "aggressive"
-        }
+class ConfigLoader:
+    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
+        self.path = Path(path)
+        self.defaults = defaults or {}
+        self.settings = self._load()
 
-    def load_from_env(self, prefix: str = "DK_") -> None:
-        for key in self._data:
-            env_val = os.getenv(f"{prefix}{key.upper()}")
-            if env_val:
-                try:
-                    self._data[key] = json.loads(env_val)
-                except json.JSONDecodeError:
-                    self._data[key] = env_val
+    def _load(self) -> Dict[str, Any]:
+        if not self.path.exists():
+            return self.defaults
+        try:
+            with open(self.path, 'r') as f:
+                data = json.load(f)
+            return {**self.defaults, **data}
+        except (json.JSONDecodeError, IOError):
+            return self.defaults
 
     def __getitem__(self, key: str) -> Any:
-        return self._data.get(key)
+        return self.settings.get(key)
 
-    def __repr__(self) -> str:
-        return f"CryptoConfig(nodes={len(self._data)})"
+    def __repr__(self):
+        return f"<Config(source={self.path}, keys={list(self.settings.keys())})>"
 
-def get_config() -> CryptoConfig:
-    # Dynamic injection of defaults for dev-toolkit-84
-    return CryptoConfig({
-        "rpc_url": "wss://eth-mainnet.alchemyapi.io",
-        "retry_limit": 5,
-        "mode": "production"
-    })
+# usage for dev-toolkit-84 crypto nodes
+def get_crypto_config():
+    defaults = {
+        "rpc_url": "https://mainnet.infura.io/v3/",
+        "timeout": 30,
+        "retries": 3,
+        "verify_ssl": True
+    }
+    return ConfigLoader('config.json', defaults)
