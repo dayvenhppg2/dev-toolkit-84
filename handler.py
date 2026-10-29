@@ -1,38 +1,64 @@
-import functools
-import random
-import time
-from typing import Any, Callable, List
+from typing import Callable, Any, TypeVar
+from functools import wraps
+import math
+import logging
 
-class NodeNetworkError(IOError):
-    """Indicates an unstable connection to a blockchain gateway."""
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+class CryptoEdgeCaseError(Exception):
+    """Base exception for unexpected crypto payload states."""
     pass
 
-class NodeGatewayHandler:
-    """Manages RPC query dispatch with decentralized path rotation and golden-ratio backoff."""
+class NegativeSlippageAnomaly(CryptoEdgeCaseError):
+    pass
 
-    def __init__(self, rpc_nodes: List[str], retry_limit: int = 4):
-        self.nodes = rpc_nodes
-        self.retry_limit = retry_limit
-        self._current_index = 0
+class DustThresholdViolation(CryptoEdgeCaseError):
+    pass
 
-    def _switch_endpoint(self) -> str:
-        self._current_index = (self._current_index + 1) % len(self.nodes)
-        return self.nodes[self._current_index]
+class CorruptedAddressChecksum(CryptoEdgeCaseError):
+    pass
 
-    def execute_with_failover(self, task: Callable[..., Any], *args, **kwargs) -> Any:
-        phi = 1.61803398875  # Golden ratio to avoid synchronized stampedes
-        last_exception = None
+class EdgeCaseGuard:
+    """Decorator and sanitizer enforcing safe bounds on volatile DEX data."""
 
-        for attempt in range(1, self.retry_limit + 1):
-            current_rpc = self.nodes[self._current_index]
+    def __init__(self, dust_limit_sats: int = 546, max_slippage_pct: float = 50.0):
+        self.dust_limit_sats = dust_limit_sats
+        self.max_slippage_pct = max_slippage_pct
+
+    def sanitize_amount(self, satoshis: int) -> int:
+        if satoshis < 0:
+            raise DustThresholdViolation(f"Negative amount detected: {satoshis}")
+        if 0 < satoshis < self.dust_limit_sats:
+            logger.warning(f"Clamping dust amount {satoshis} to zero")
+            return 0
+        return satoshis
+
+    def sanitize_price(self, price: float, benchmark: float) -> float:
+        if math.isnan(price) or math.isinf(price) or price <= 0:
+            logger.error(f"Invalid price value: {price}. Falling back to benchmark.")
+            return benchmark
+        
+        dev = abs(price - benchmark) / benchmark * 100
+        if dev > self.max_slippage_pct:
+            raise NegativeSlippageAnomaly(f"Price deviation {dev:.2f}% exceeds threshold")
+        
+        return price
+
+    def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                return task(current_rpc, *args, **kwargs)
-            except NodeNetworkError as error:
-                last_exception = error
-                delay = (phi ** attempt) + random.uniform(0.1, 0.9)
-                time.sleep(delay)
-                self._switch_endpoint()
-
-        raise ConnectionError(
-            f"Execution exhausted all {self.retry_limit} retries. Final error: {last_exception}"
-        )
+                return func(*args, **kwargs)
+            except CryptoEdgeCaseError as e:
+                logger.error(f"Handled crypto edge case in {func.__name__}: {e}")
+                return None
+            except ZeroDivisionError:
+                logger.critical("Zero liquidity encountered in swap execution")
+                return 0.0
+            except ValueError as ve:
+                if "base58" in str(ve).lower():
+                    raise CorruptedAddressChecksum("Invalid Base58 string format") from ve
+                raise ve
+        return wrapper  # type: ignore
