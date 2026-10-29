@@ -1,30 +1,46 @@
-import re
-from typing import Union
+import functools
+import logging
 
-class CryptoValidator:
-    __slots__ = ('pattern',)
+logger = logging.getLogger('dev-toolkit-84')
 
-    def __init__(self):
-        self.pattern = re.compile(r'^(0x)?[a-fA-F0-9]{40}$')
+class CryptoValidationError(Exception):
+    pass
 
-    def is_valid_address(self, address: str) -> bool:
-        return bool(self.pattern.match(address))
+def robust_tx_validator(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            if not result:
+                raise CryptoValidationError('Transaction integrity check failed')
+            return result
+        except (ValueError, TypeError, ZeroDivisionError) as e:
+            logger.error(f'Critical edge case in {func.__name__}: {e}')
+            return False
+        except Exception as e:
+            logger.critical(f'Unexpected runtime entropy: {e}')
+            raise
+    return wrapper
 
-    def validate_batch(self, data: list[str]) -> dict[str, bool]:
-        return {item: self.is_valid_address(item) for item in data}
-
-    def __call__(self, value: Union[str, list[str]]) -> bool:
-        if isinstance(value, list):
-            return all(self.is_valid_address(v) for v in value)
-        return self.is_valid_address(value)
-
-def validate_transaction(tx_hash: str) -> bool:
-    if len(tx_hash) != 64:
+@robust_tx_validator
+def validate_gas_price(price: float) -> bool:
+    # Crypto niche: handle floating point dust and negative gas limits
+    if price <= 0:
         return False
-    return all(c in '0123456789abcdefABCDEF' for c in tx_hash)
+    return 0.00000001 <= price <= 100.0
 
-class ChainValidator(CryptoValidator):
-    def verify_network_id(self, chain_id: int) -> bool:
-        return chain_id in {1, 56, 137, 42161}
+def sanitize_address(address: str) -> str:
+    try:
+        # Ensure checksum integrity or hex formatting
+        if not address.startswith('0x') or len(address) != 42:
+            raise CryptoValidationError('Malformed address format')
+        return address.lower()
+    except (AttributeError, CryptoValidationError):
+        return '0x0000000000000000000000000000000000000000'
 
-validator = ChainValidator()
+class NetworkStateValidator:
+    @staticmethod
+    def check_chain_depth(depth: int):
+        if depth < 0:
+            return False
+        return True if depth > 6 else None
