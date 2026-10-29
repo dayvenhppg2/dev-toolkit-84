@@ -1,49 +1,49 @@
 import hashlib
-from typing import Dict, Any, List, Generator
+import json
+from typing import Any, Dict, Iterable, Generator
 
-class PipelineRegistry(type):
-    """Metaclass maintaining ordered stage transformations."""
-    stages: List[type] = []
 
-    def __init__(cls, name, bases, attrs):
-        super().__init__(name, bases, attrs)
-        if name != "Stage":
-            cls.stages.append(cls)
+class PayloadValidationError(Exception):
+    """Raised when stream payload fails crypto integrity checks."""
+    pass
 
-class Stage(metaclass=PipelineRegistry):
-    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        raise NotImplementedError
 
-class SanitizerStage(Stage):
-    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        addr = payload.get("address", "").strip().lower()
-        payload["address"] = addr
-        payload["is_valid"] = addr.startswith("0x") and len(addr) == 42
-        return payload
+def _verify_frame(frame: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate transaction structure and verify sha256 checksum."""
+    required_fields = {"tx_id", "sender", "receiver", "amount", "nonce", "sig_hash"}
+    if not required_fields.issubset(frame.keys()):
+        missing = required_fields - frame.keys()
+        raise PayloadValidationError(f"Missing required keys: {missing}")
 
-class HashingStage(Stage):
-    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        raw = f"{payload.get('address')}:{payload.get('amount')}:{payload.get('nonce')}"
-        payload["hash"] = "0x" + hashlib.sha256(raw.encode()).hexdigest()
-        return payload
+    if not isinstance(frame["amount"], (int, float)) or frame["amount"] <= 0:
+        raise PayloadValidationError(f"Invalid transaction amount: {frame['amount']}")
 
-class GasCalculationStage(Stage):
-    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        payload["gas_limit"] = 21000 if not payload.get("data") else 68000
-        payload["max_priority_fee"] = 2.0 if payload.get("priority") else 1.0
-        return payload
+    raw_payload = f"{frame['tx_id']}:{frame['sender']}:{frame['receiver']}:{frame['amount']}:{frame['nonce']}"
+    expected_hash = hashlib.sha256(raw_payload.encode()).hexdigest()[:16]
+    
+    if frame["sig_hash"] != expected_hash:
+        raise PayloadValidationError("Transaction signature hash mismatch")
+        
+    return frame
 
-class TransactionProcessor:
-    """Stream processor with implicit state cleanup via generator finalization."""
-    def __init__(self, queue: List[Dict[str, Any]]):
-        self._queue = queue
 
-    def run(self) -> Generator[Dict[str, Any], None, None]:
+def process_stream(data_stream: Iterable[Any]) -> Generator[Dict[str, Any], None, None]:
+    """Main stream processing loop with defensive pattern matching validation."""
+    for raw_item in data_stream:
         try:
-            while self._queue:
-                tx = self._queue.pop(0)
-                for stage_cls in PipelineRegistry.stages:
-                    tx = stage_cls().process(tx)
-                yield tx
-        finally:
-            self._queue.clear()
+            match raw_item:
+                case dict() as data:
+                    payload = data
+                case str() as text if text.strip().startswith("{"):
+                    payload = json.loads(text)
+                case bytes() as raw_bytes:
+                    payload = json.loads(raw_bytes.decode("utf-8"))
+                case _:
+                    raise PayloadValidationError(f"Unsupported stream frame type: {type(raw_item).__name__}")
+
+            validated_tx = _verify_frame(payload)
+            yield validated_tx
+
+        except (json.JSONDecodeError, UnicodeDecodeError, PayloadValidationError):
+            # Drop malformed payload frames and continue processing stream
+            continue
