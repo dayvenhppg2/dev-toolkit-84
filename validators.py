@@ -1,46 +1,32 @@
-import functools
-import logging
+import re
+from typing import Any, Dict
 
-logger = logging.getLogger('dev-toolkit-84')
+class CryptoValidator:
+    PATTERN_ADDRESS = re.compile(r'^(0x)?[0-9a-fA-F]{40}$')
+    
+    def __init__(self, schema: Dict[str, str]):
+        self.schema = schema
 
-class CryptoValidationError(Exception):
-    pass
+    def validate(self, payload: Dict[str, Any]) -> bool:
+        return all(self._check(k, v) for k, v in payload.items())
 
-def robust_tx_validator(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            result = func(*args, **kwargs)
-            if not result:
-                raise CryptoValidationError('Transaction integrity check failed')
-            return result
-        except (ValueError, TypeError, ZeroDivisionError) as e:
-            logger.error(f'Critical edge case in {func.__name__}: {e}')
-            return False
-        except Exception as e:
-            logger.critical(f'Unexpected runtime entropy: {e}')
-            raise
-    return wrapper
+    def _check(self, key: str, value: Any) -> bool:
+        expected = self.schema.get(key)
+        if not expected:
+            return True
+        if expected == 'address':
+            return bool(self.PATTERN_ADDRESS.match(str(value)))
+        if expected == 'hex':
+            return str(value).startswith('0x')
+        return isinstance(value, type(expected))
 
-@robust_tx_validator
-def validate_gas_price(price: float) -> bool:
-    # Crypto niche: handle floating point dust and negative gas limits
-    if price <= 0:
-        return False
-    return 0.00000001 <= price <= 100.0
+def validate_transaction(tx: Dict[str, Any]) -> bool:
+    schema = {'sender': 'address', 'receiver': 'address', 'amount': int}
+    return CryptoValidator(schema).validate(tx)
 
-def sanitize_address(address: str) -> str:
-    try:
-        # Ensure checksum integrity or hex formatting
-        if not address.startswith('0x') or len(address) != 42:
-            raise CryptoValidationError('Malformed address format')
-        return address.lower()
-    except (AttributeError, CryptoValidationError):
-        return '0x0000000000000000000000000000000000000000'
+def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: str(v).strip() for k, v in data.items() if v is not None}
 
-class NetworkStateValidator:
-    @staticmethod
-    def check_chain_depth(depth: int):
-        if depth < 0:
-            return False
-        return True if depth > 6 else None
+if __name__ == '__main__':
+    mock = {'sender': '0x123', 'amount': 100}
+    print(f'Validation status: {validate_transaction(mock)}')
