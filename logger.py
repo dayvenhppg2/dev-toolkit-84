@@ -1,56 +1,37 @@
-import os
-import re
 import logging
 from logging.handlers import RotatingFileHandler
+import sys
+from pathlib import Path
 
+class CryptoLogger:
+    def __init__(self, name: str = 'dev-toolkit-84'):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        self._setup()
 
-class CryptoAddressMaskingFormatter(logging.Formatter):
-    """Formatter that redacts potential private keys and truncates wallet addresses."""
-
-    PRIVKEY_REGEX = re.compile(r"(?i)\b(0x)?[a-f0-9]{64}\b")
-    ADDRESS_REGEX = re.compile(r"(?i)\b(0x[a-f0-9]{40})\b")
-
-    def format(self, record: logging.LogRecord) -> str:
-        original = super().format(record)
-        sanitized = self.PRIVKEY_REGEX.sub("[REDACTED_SECRET_KEY]", original)
-
-        def shorten_addr(match):
-            addr = match.group(1)
-            return f"{addr[:6]}...{addr[-4:]}"
-
-        return self.ADDRESS_REGEX.sub(shorten_addr, sanitized)
-
-
-def setup_crypto_logger(
-    name: str = "dev_toolkit_crypto",
-    log_file: str = "logs/crypto_activity.log",
-    max_bytes: int = 2 * 1024 * 1024,
-    backup_count: int = 5,
-    level: int = logging.INFO,
-) -> logging.Logger:
-    """Sets up a size-rotating logger tailored for crypto dev toolkits."""
-    log_dir = os.path.dirname(log_file)
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
-
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    logger.propagate = False
-
-    if not logger.handlers:
-        file_handler = RotatingFileHandler(
-            filename=log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8",
+    def _setup(self):
+        log_dir = Path('logs')
+        log_dir.mkdir(exist_ok=True)
+        
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
         )
-        fmt = "%(asctime)s | %(levelname)-8s | [%(name)s] %(message)s"
-        formatter = CryptoAddressMaskingFormatter(fmt, datefmt="%Y-%m-%d %H:%M:%S")
+
+        file_handler = RotatingFileHandler(
+            log_dir / 'crypto.log', 
+            maxBytes=5*1024*1024, 
+            backupCount=3
+        )
         file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
 
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
 
-    return logger
+        if not self.logger.handlers:
+            self.logger.addHandler(file_handler)
+            self.logger.addHandler(stream_handler)
+
+    def get_logger(self):
+        return self.logger
+
+logger = CryptoLogger().get_logger()
