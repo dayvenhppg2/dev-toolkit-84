@@ -1,36 +1,43 @@
 import json
 import os
-from pathlib import Path
 from typing import Any, Dict
 
-class ConfigLoader:
-    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
-        self.path = Path(path)
-        self.defaults = defaults or {}
-        self.settings = self._load()
 
-    def _load(self) -> Dict[str, Any]:
-        if not self.path.exists():
-            return self.defaults
-        try:
-            with open(self.path, 'r') as f:
-                data = json.load(f)
-            return {**self.defaults, **data}
-        except (json.JSONDecodeError, IOError):
-            return self.defaults
-
-    def __getitem__(self, key: str) -> Any:
-        return self.settings.get(key)
-
-    def __repr__(self):
-        return f"<Config(source={self.path}, keys={list(self.settings.keys())})>"
-
-# usage for dev-toolkit-84 crypto nodes
-def get_crypto_config():
-    defaults = {
-        "rpc_url": "https://mainnet.infura.io/v3/",
-        "timeout": 30,
-        "retries": 3,
-        "verify_ssl": True
+class CryptoConfigMeta(type):
+    _defaults: Dict[str, Any] = {
+        "ETH_RPC_URL": "https://eth-mainnet.g.alchemy.com/v2/demo",
+        "SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
+        "DEFAULT_SLIPPAGE_BPS": 50,
+        "GAS_MULTIPLIER": 1.15,
+        "ENABLE_MEV_PROTECTION": True,
+        "SUPPORTED_CHAINS": ["ethereum", "arbitrum", "solana", "polygon"],
     }
-    return ConfigLoader('config.json', defaults)
+
+    def __getattr__(cls, name: str) -> Any:
+        if name not in cls._defaults:
+            raise AttributeError(f"Configuration key '{name}' is not recognized")
+
+        raw_val = os.getenv(f"CRYPTO_{name}", cls._defaults[name])
+        default_type = type(cls._defaults[name])
+
+        if default_type is bool and isinstance(raw_val, str):
+            return raw_val.lower() in ("true", "1", "yes")
+        if default_type in (int, float) and isinstance(raw_val, str):
+            return default_type(raw_val)
+        if default_type is list and isinstance(raw_val, str):
+            return [item.strip() for item in raw_val.split(",")]
+        return raw_val
+
+
+class Config(metaclass=CryptoConfigMeta):
+    @classmethod
+    def as_dict(cls) -> Dict[str, Any]:
+        return {key: getattr(cls, key) for key in cls._defaults}
+
+    @classmethod
+    def export_json(cls) -> str:
+        return json.dumps(cls.as_dict(), indent=2)
+
+    @classmethod
+    def is_chain_supported(cls, chain_name: str) -> bool:
+        return chain_name.lower() in [c.lower() for c in cls.SUPPORTED_CHAINS]
