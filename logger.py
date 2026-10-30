@@ -1,35 +1,56 @@
-import logging
 import os
-from datetime import datetime
+import re
+import logging
+from logging.handlers import RotatingFileHandler
 
-class CryptoLogger:
-    def __init__(self, name: str = 'dev-toolkit-84'):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        fmt = '%(asctime)s | %(levelname)s | %(message)s'
-        formatter = logging.Formatter(fmt)
 
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        self.logger.addHandler(console)
+class CryptoAddressMaskingFormatter(logging.Formatter):
+    """Formatter that redacts potential private keys and truncates wallet addresses."""
 
-        log_dir = 'logs'
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+    PRIVKEY_REGEX = re.compile(r"(?i)\b(0x)?[a-f0-9]{64}\b")
+    ADDRESS_REGEX = re.compile(r"(?i)\b(0x[a-f0-9]{40})\b")
 
-        file_path = os.path.join(log_dir, f'crypto_{datetime.now().strftime("%Y%m%d")}.log')
-        file_handler = logging.FileHandler(file_path)
+    def format(self, record: logging.LogRecord) -> str:
+        original = super().format(record)
+        sanitized = self.PRIVKEY_REGEX.sub("[REDACTED_SECRET_KEY]", original)
+
+        def shorten_addr(match):
+            addr = match.group(1)
+            return f"{addr[:6]}...{addr[-4:]}"
+
+        return self.ADDRESS_REGEX.sub(shorten_addr, sanitized)
+
+
+def setup_crypto_logger(
+    name: str = "dev_toolkit_crypto",
+    log_file: str = "logs/crypto_activity.log",
+    max_bytes: int = 2 * 1024 * 1024,
+    backup_count: int = 5,
+    level: int = logging.INFO,
+) -> logging.Logger:
+    """Sets up a size-rotating logger tailored for crypto dev toolkits."""
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False
+
+    if not logger.handlers:
+        file_handler = RotatingFileHandler(
+            filename=log_file,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        fmt = "%(asctime)s | %(levelname)-8s | [%(name)s] %(message)s"
+        formatter = CryptoAddressMaskingFormatter(fmt, datefmt="%Y-%m-%d %H:%M:%S")
         file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
+        logger.addHandler(file_handler)
 
-    def trace_trade(self, symbol: str, price: float, side: str):
-        msg = f"[{side.upper()}] {symbol} @ {price:.8f}"
-        self.logger.info(msg)
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
-    def log_anomaly(self, metric: str, value: float):
-        if abs(value) > 0.5:
-            self.logger.warning(f"ANOMALY DETECTED: {metric} value {value}")
-
-def get_logger():
-    return CryptoLogger().logger
+    return logger
