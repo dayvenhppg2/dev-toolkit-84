@@ -1,37 +1,51 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import sys
-from pathlib import Path
+import hashlib
+import time
+from collections import deque
+from typing import Any, Dict, List, Optional
 
-class CryptoLogger:
-    def __init__(self, name: str = 'dev-toolkit-84'):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        self._setup()
+class CryptoTraceLogger:
+    """Self-compacting trace logger for crypto operations."""
 
-    def _setup(self):
-        log_dir = Path('logs')
-        log_dir.mkdir(exist_ok=True)
-        
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
-        )
+    COLORS = {
+        "DEBUG": "\u001b[36m",
+        "INFO": "\u001b[32m",
+        "WARN": "\u001b[33m",
+        "CRITICAL": "\u001b[35m",
+        "RESET": "\u001b[0m",
+    }
 
-        file_handler = RotatingFileHandler(
-            log_dir / 'crypto.log', 
-            maxBytes=5*1024*1024, 
-            backupCount=3
-        )
-        file_handler.setFormatter(formatter)
+    def __init__(self, max_depth: int = 100) -> None:
+        self._trace_ring: deque = deque(maxlen=max_depth)
+        self._session_salt: bytes = hashlib.sha256(
+            str(time.time_ns()).encode()
+        ).digest()[:8]
 
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
+    def _tag(self, level: str, topic: str) -> str:
+        digest = hashlib.blake2b(
+            f"{topic}:{level}".encode(), key=self._session_salt, digest_size=3
+        ).hexdigest()
+        color = self.COLORS.get(level, self.COLORS["RESET"])
+        return f"{color}[{level}][#{digest}]{self.COLORS['RESET']}"
 
-        if not self.logger.handlers:
-            self.logger.addHandler(file_handler)
-            self.logger.addHandler(stream_handler)
+    def emit(self, level: str, topic: str, payload: Dict[str, Any]) -> str:
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        tag = self._tag(level.upper(), topic.lower())
+        sanitized = {
+            k: (v if "key" not in k.lower() and "secret" not in k.lower() else "<REDACTED>")
+            for k, v in payload.items()
+        }
+        entry = f"{timestamp} {tag} ({topic}): {sanitized}"
+        self._trace_ring.append((timestamp, level, topic, sanitized))
+        return entry
 
-    def get_logger(self):
-        return self.logger
+    def flush_trace(self, topic_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        extracted = [
+            {"time": ts, "level": lvl, "topic": top, "data": data}
+            for ts, lvl, top, data in list(self._trace_ring)
+            if topic_filter is None or top == topic_filter
+        ]
+        if topic_filter is None:
+            self._trace_ring.clear()
+        return extracted
 
-logger = CryptoLogger().get_logger()
+default_logger = CryptoTraceLogger()
