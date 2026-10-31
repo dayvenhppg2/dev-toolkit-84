@@ -1,51 +1,65 @@
-import hashlib
-import time
-from collections import deque
-from typing import Any, Dict, List, Optional
+import os
+import re
+import logging
+from logging.handlers import RotatingFileHandler
 
-class CryptoTraceLogger:
-    """Self-compacting trace logger for crypto operations."""
 
-    COLORS = {
-        "DEBUG": "\u001b[36m",
-        "INFO": "\u001b[32m",
-        "WARN": "\u001b[33m",
-        "CRITICAL": "\u001b[35m",
-        "RESET": "\u001b[0m",
-    }
+class CryptoAnonymizingFormatter(logging.Formatter):
+    """Custom logger formatter that redacts sensitive crypto keys and tokens."""
 
-    def __init__(self, max_depth: int = 100) -> None:
-        self._trace_ring: deque = deque(maxlen=max_depth)
-        self._session_salt: bytes = hashlib.sha256(
-            str(time.time_ns()).encode()
-        ).digest()[:8]
+    PATTERNS = [
+        (
+            re.compile(
+                r'(?i)(api[_\-]?key|secret|private[_\-]?key)["\\']?\s*[:=]\s*["\\']?([a-f0-9]{32,64})["\\']?'
+            ),
+            r"\1=***REDACTED***",
+        ),
+        (re.compile(r"\b0x[a-fA-F0-9]{64}\b"), "0x" + "*" * 60 + "MASKED"),
+    ]
 
-    def _tag(self, level: str, topic: str) -> str:
-        digest = hashlib.blake2b(
-            f"{topic}:{level}".encode(), key=self._session_salt, digest_size=3
-        ).hexdigest()
-        color = self.COLORS.get(level, self.COLORS["RESET"])
-        return f"{color}[{level}][#{digest}]{self.COLORS['RESET']}"
+    def format(self, record: logging.LogRecord) -> str:
+        original_msg = super().format(record)
+        redacted_msg = original_msg
+        for pattern, replacement in self.PATTERNS:
+            redacted_msg = pattern.sub(replacement, redacted_msg)
+        return redacted_msg
 
-    def emit(self, level: str, topic: str, payload: Dict[str, Any]) -> str:
-        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        tag = self._tag(level.upper(), topic.lower())
-        sanitized = {
-            k: (v if "key" not in k.lower() and "secret" not in k.lower() else "<REDACTED>")
-            for k, v in payload.items()
-        }
-        entry = f"{timestamp} {tag} ({topic}): {sanitized}"
-        self._trace_ring.append((timestamp, level, topic, sanitized))
-        return entry
 
-    def flush_trace(self, topic_filter: Optional[str] = None) -> List[Dict[str, Any]]:
-        extracted = [
-            {"time": ts, "level": lvl, "topic": top, "data": data}
-            for ts, lvl, top, data in list(self._trace_ring)
-            if topic_filter is None or top == topic_filter
-        ]
-        if topic_filter is None:
-            self._trace_ring.clear()
-        return extracted
+def setup_crypto_logger(
+    name: str = "crypto_toolkit",
+    log_dir: str = "logs",
+    max_bytes: int = 5 * 1024 * 1024,
+    backup_count: int = 5,
+    level: int = logging.INFO,
+) -> logging.Logger:
+    """Configures a size-rotated file logger tailored for crypto applications."""
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{name}.log")
 
-default_logger = CryptoTraceLogger()
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False
+
+    if logger.handlers:
+        return logger
+
+    fmt_str = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
+    formatter = CryptoAnonymizingFormatter(fmt_str, datefmt="%Y-%m-%d %H:%M:%S")
+
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(level)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(level)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
