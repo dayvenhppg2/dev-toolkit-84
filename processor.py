@@ -1,49 +1,44 @@
 import hashlib
-import json
-from typing import Any, Dict, Iterable, Generator
+import time
+from collections import deque
+from typing import Dict, Generator, List, Tuple, Any
 
 
-class PayloadValidationError(Exception):
-    """Raised when stream payload fails crypto integrity checks."""
-    pass
+class CryptoTickProcessor:
+    """Sliding-window VWAP and anomaly stream processor for tick data."""
 
+    def __init__(self, window_size: int = 100, entropy_threshold: float = 3.5):
+        self.window_size = window_size
+        self.entropy_threshold = entropy_threshold
+        self._buffer: deque = deque(maxlen=window_size)
+        self._seen_hashes: set = set()
 
-def _verify_frame(frame: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate transaction structure and verify sha256 checksum."""
-    required_fields = {"tx_id", "sender", "receiver", "amount", "nonce", "sig_hash"}
-    if not required_fields.issubset(frame.keys()):
-        missing = required_fields - frame.keys()
-        raise PayloadValidationError(f"Missing required keys: {missing}")
+    def _compute_tick_hash(self, price: float, volume: float, timestamp: float) -> str:
+        payload = f"{price:.8f}:{volume:.8f}:{int(timestamp)}".encode('utf-8')
+        return hashlib.blake2b(payload, digest_size=8).hexdigest()
 
-    if not isinstance(frame["amount"], (int, float)) or frame["amount"] <= 0:
-        raise PayloadValidationError(f"Invalid transaction amount: {frame['amount']}")
+    def process_stream(self, raw_ticks: List[Dict[str, Any]]) -> Generator[Tuple[float, float, bool], None, None]:
+        """
+        Deduplicates ticks via BLAKE2b fingerprinting and yields (VWAP, TotalVol, IsAnomaly).
+        """
+        for tick in raw_ticks:
+            price = float(tick.get("price", 0.0))
+            volume = float(tick.get("volume", 0.0))
+            ts = float(tick.get("timestamp", time.time()))
 
-    raw_payload = f"{frame['tx_id']}:{frame['sender']}:{frame['receiver']}:{frame['amount']}:{frame['nonce']}"
-    expected_hash = hashlib.sha256(raw_payload.encode()).hexdigest()[:16]
-    
-    if frame["sig_hash"] != expected_hash:
-        raise PayloadValidationError("Transaction signature hash mismatch")
-        
-    return frame
+            tick_id = self._compute_tick_hash(price, volume, ts)
+            if tick_id in self._seen_hashes:
+                continue
 
+            self._seen_hashes.add(tick_id)
+            if len(self._seen_hashes) > self.window_size * 2:
+                self._seen_hashes.clear()
 
-def process_stream(data_stream: Iterable[Any]) -> Generator[Dict[str, Any], None, None]:
-    """Main stream processing loop with defensive pattern matching validation."""
-    for raw_item in data_stream:
-        try:
-            match raw_item:
-                case dict() as data:
-                    payload = data
-                case str() as text if text.strip().startswith("{"):
-                    payload = json.loads(text)
-                case bytes() as raw_bytes:
-                    payload = json.loads(raw_bytes.decode("utf-8"))
-                case _:
-                    raise PayloadValidationError(f"Unsupported stream frame type: {type(raw_item).__name__}")
+            self._buffer.append((price, volume))
+            total_vol = sum(v for _, v in self._buffer)
+            vwap = sum(p * v for p, v in self._buffer) / total_vol if total_vol > 0 else price
 
-            validated_tx = _verify_frame(payload)
-            yield validated_tx
+            avg_vol = total_vol / len(self._buffer)
+            is_anomaly = volume > (avg_vol * self.entropy_threshold) if avg_vol > 0 else False
 
-        except (json.JSONDecodeError, UnicodeDecodeError, PayloadValidationError):
-            # Drop malformed payload frames and continue processing stream
-            continue
+            yield round(vwap, 8), round(total_vol, 4), is_anomaly
