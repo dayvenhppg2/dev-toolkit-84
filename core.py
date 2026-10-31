@@ -1,31 +1,55 @@
-import logging
-from typing import Dict, List, Any
-from decimal import Decimal
+import struct
+import mmap
+from typing import Tuple, Generator
 
-class CryptoEngine:
-    def __init__(self, assets: Dict[str, float]):
-        self._ledger = {k: Decimal(str(v)) for k, v in assets.items()}
-        self.logger = logging.getLogger('dev-toolkit-84')
+class FastOrderBookCache:
+    """
+    Memory-aligned struct packed order book buffer for zero-GC ticker processing.
+    Packs (price: float64, amount: float64, side: uint8) directly into an mmap region.
+    """
+    ENTRY_FORMAT = ">ddB"
+    ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
 
-    def sanitize_assets(self) -> None:
-        self._ledger = {k: v for k, v in self._ledger.items() if v > 0}
+    def __init__(self, capacity: int = 10000):
+        self.capacity = capacity
+        self.buffer_size = self.ENTRY_SIZE * capacity
+        self._mem = mmap.mmap(-1, self.buffer_size)
+        self._head = 0
+        self._count = 0
 
-    def distribute_dust(self, threshold: Decimal) -> Dict[str, Decimal]:
-        dust = {k: v for k, v in self._ledger.items() if v < threshold}
-        for symbol in dust:
-            del self._ledger[symbol]
-        return dust
+    def push_trade(self, price: float, amount: float, is_ask: bool) -> None:
+        offset = self._head * self.ENTRY_SIZE
+        struct.pack_into(
+            self.ENTRY_FORMAT,
+            self._mem,
+            offset,
+            price,
+            amount,
+            1 if is_ask else 0
+        )
+        self._head = (self._head + 1) % self.capacity
+        if self._count < self.capacity:
+            self._count += 1
 
-    def get_summary(self) -> str:
-        return ' | '.join(f'{k}: {v:.8f}' for k, v in self._ledger.items())
+    def stream_latest(self, n: int) -> Generator[Tuple[float, float, bool], None, None]:
+        limit = min(n, self._count)
+        start_idx = (self._head - limit) % self.capacity
+        for i in range(limit):
+            idx = (start_idx + i) % self.capacity
+            offset = idx * self.ENTRY_SIZE
+            price, amount, side_int = struct.unpack_from(self.ENTRY_FORMAT, self._mem, offset)
+            yield price, amount, bool(side_int)
 
-def initialize_toolkit(data: List[Any]) -> CryptoEngine:
-    assets = {item['sym']: item['amt'] for item in data}
-    engine = CryptoEngine(assets)
-    engine.sanitize_assets()
-    return engine
+    def clear(self) -> None:
+        self._head = 0
+        self._count = 0
 
-if __name__ == '__main__':
-    raw_data = [{'sym': 'BTC', 'amt': 0.0001}, {'sym': 'ETH', 'amt': 0.05}]
-    engine = initialize_toolkit(raw_data)
-    print(f'Toolkit Status: {engine.get_summary()}')
+    def calculate_vwap(self) -> float:
+        if self._count == 0:
+            return 0.0
+        total_vol = 0.0
+        weighted_sum = 0.0
+        for price, amount, _ in self.stream_latest(self._count):
+            total_vol += amount
+            weighted_sum += price * amount
+        return weighted_sum / total_vol if total_vol > 0 else 0.0
