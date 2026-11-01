@@ -1,55 +1,64 @@
-import struct
-import mmap
-from typing import Tuple, Generator
+"""Crypto state accumulator and payload obfuscator module."""
 
-class FastOrderBookCache:
+from dataclasses import dataclass, field
+from hashlib import sha256
+from typing import Generator, List, Optional, Tuple, TypeVar
+
+T = TypeVar("T", bound=bytes)
+
+
+@dataclass
+class CryptoStateEngine:
+    """A deterministic byte-scrambling and state-accumulation pipeline.
+
+    Utilizes sliding XOR windows combined with cascading SHA-256 state updates
+    to generate pseudo-entropy streams for payload signatures.
     """
-    Memory-aligned struct packed order book buffer for zero-GC ticker processing.
-    Packs (price: float64, amount: float64, side: uint8) directly into an mmap region.
-    """
-    ENTRY_FORMAT = ">ddB"
-    ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
 
-    def __init__(self, capacity: int = 10000):
-        self.capacity = capacity
-        self.buffer_size = self.ENTRY_SIZE * capacity
-        self._mem = mmap.mmap(-1, self.buffer_size)
-        self._head = 0
-        self._count = 0
+    seed: bytes
+    rounds: int = 16
+    _history: List[bytes] = field(default_factory=list, init=False)
 
-    def push_trade(self, price: float, amount: float, is_ask: bool) -> None:
-        offset = self._head * self.ENTRY_SIZE
-        struct.pack_into(
-            self.ENTRY_FORMAT,
-            self._mem,
-            offset,
-            price,
-            amount,
-            1 if is_ask else 0
-        )
-        self._head = (self._head + 1) % self.capacity
-        if self._count < self.capacity:
-            self._count += 1
+    def __post_init__(self) -> None:
+        if not self.seed:
+            raise ValueError("Seed buffer cannot be empty.")
+        self._history.append(sha256(self.seed).digest())
 
-    def stream_latest(self, n: int) -> Generator[Tuple[float, float, bool], None, None]:
-        limit = min(n, self._count)
-        start_idx = (self._head - limit) % self.capacity
-        for i in range(limit):
-            idx = (start_idx + i) % self.capacity
-            offset = idx * self.ENTRY_SIZE
-            price, amount, side_int = struct.unpack_from(self.ENTRY_FORMAT, self._mem, offset)
-            yield price, amount, bool(side_int)
+    def _cascade_hash(self, current: bytes, modifier: int) -> bytes:
+        """Derive next state block using XOR shifts and SHA-256.
 
-    def clear(self) -> None:
-        self._head = 0
-        self._count = 0
+        :param current: Input bytes block to transform.
+        :param modifier: Round index modifier for dynamic salt.
+        :return: 32-byte hash digest representing state transition.
+        """
+        salt = modifier.to_bytes(4, byteorder="big")
+        xor_block = bytes(b ^ salt[i % len(salt)] for i, b in enumerate(current))
+        return sha256(xor_block + current).digest()
 
-    def calculate_vwap(self) -> float:
-        if self._count == 0:
-            return 0.0
-        total_vol = 0.0
-        weighted_sum = 0.0
-        for price, amount, _ in self.stream_latest(self._count):
-            total_vol += amount
-            weighted_sum += price * amount
-        return weighted_sum / total_vol if total_vol > 0 else 0.0
+    def generate_entropy_stream(
+        self, payload: bytes, count: int = 4
+    ) -> Generator[Tuple[int, bytes], None, None]:
+        """Yield a sequence of state-bound derived cryptographic blocks.
+
+        :param payload: Data payload used to perturb entropy pool.
+        :param count: Total number of iterations to yield.
+        :return: Generator yielding tuple of (step_index, block_hash).
+        """
+        state = sha256(self.seed + payload).digest()
+        for idx in range(count):
+            for r in range(self.rounds):
+                state = self._cascade_hash(state, r + idx)
+            self._history.append(state)
+            yield (idx, state)
+
+    def extract_proof(self) -> Optional[bytes]:
+        """Aggregate current history stack into a singular verification tag.
+
+        :return: Final combined digest bytes or None if history is uninitialized.
+        """
+        if not self._history:
+            return None
+        acc = self._history[0]
+        for item in self._history[1:]:
+            acc = bytes(a ^ b for a, b in zip(acc, item))
+        return sha256(acc).digest()
