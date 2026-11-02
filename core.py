@@ -1,64 +1,77 @@
-"""Crypto state accumulator and payload obfuscator module."""
+import struct
+from typing import Iterator, Tuple, Optional
 
-from dataclasses import dataclass, field
-from hashlib import sha256
-from typing import Generator, List, Optional, Tuple, TypeVar
-
-T = TypeVar("T", bound=bytes)
-
-
-@dataclass
-class CryptoStateEngine:
-    """A deterministic byte-scrambling and state-accumulation pipeline.
-
-    Utilizes sliding XOR windows combined with cascading SHA-256 state updates
-    to generate pseudo-entropy streams for payload signatures.
+class FastTradeBuffer:
+    """Pre-allocated zero-GC ring buffer for streaming binary crypto trades.
+    Uses struct packing directly into a mutable bytearray to minimize memory allocations.
     """
+    __slots__ = ("_buffer", "_capacity", "_item_size", "_head", "_tail", "_size", "_struct_fmt")
 
-    seed: bytes
-    rounds: int = 16
-    _history: List[bytes] = field(default_factory=list, init=False)
+    def __init__(self, capacity: int = 10000):
+        self._struct_fmt = "!QQQB"
+        self._item_size = struct.calcsize(self._struct_fmt)
+        self._capacity = capacity
+        self._buffer = bytearray(self._item_size * capacity)
+        self._head = 0
+        self._tail = 0
+        self._size = 0
 
-    def __post_init__(self) -> None:
-        if not self.seed:
-            raise ValueError("Seed buffer cannot be empty.")
-        self._history.append(sha256(self.seed).digest())
+    def push(self, timestamp: int, price_e8: int, amount_e8: int, is_sell: bool) -> None:
+        offset = self._head * self._item_size
+        struct.pack_into(
+            self._struct_fmt,
+            self._buffer,
+            offset,
+            timestamp,
+            price_e8,
+            amount_e8,
+            1 if is_sell else 0,
+        )
+        self._head = (self._head + 1) % self._capacity
+        if self._size < self._capacity:
+            self._size += 1
+        else:
+            self._tail = (self._tail + 1) % self._capacity
 
-    def _cascade_hash(self, current: bytes, modifier: int) -> bytes:
-        """Derive next state block using XOR shifts and SHA-256.
+    def pop_batch(self, batch_size: int) -> Iterator[Tuple[int, float, float, str]]:
+        count = min(batch_size, self._size)
+        fmt = self._struct_fmt
+        item_size = self._item_size
+        capacity = self._capacity
+        buf = self._buffer
 
-        :param current: Input bytes block to transform.
-        :param modifier: Round index modifier for dynamic salt.
-        :return: 32-byte hash digest representing state transition.
-        """
-        salt = modifier.to_bytes(4, byteorder="big")
-        xor_block = bytes(b ^ salt[i % len(salt)] for i, b in enumerate(current))
-        return sha256(xor_block + current).digest()
+        for _ in range(count):
+            offset = self._tail * item_size
+            ts, raw_price, raw_amt, side_byte = struct.unpack_from(fmt, buf, offset)
+            self._tail = (self._tail + 1) % capacity
+            self._size -= 1
+            yield (
+                ts,
+                raw_price / 1e8,
+                raw_amt / 1e8,
+                "sell" if side_byte else "buy",
+            )
 
-    def generate_entropy_stream(
-        self, payload: bytes, count: int = 4
-    ) -> Generator[Tuple[int, bytes], None, None]:
-        """Yield a sequence of state-bound derived cryptographic blocks.
+    def vwap(self) -> float:
+        if self._size == 0:
+            return 0.0
+        
+        total_vol_price = 0
+        total_vol = 0
+        fmt = self._struct_fmt
+        item_size = self._item_size
+        capacity = self._capacity
+        buf = self._buffer
+        curr = self._tail
 
-        :param payload: Data payload used to perturb entropy pool.
-        :param count: Total number of iterations to yield.
-        :return: Generator yielding tuple of (step_index, block_hash).
-        """
-        state = sha256(self.seed + payload).digest()
-        for idx in range(count):
-            for r in range(self.rounds):
-                state = self._cascade_hash(state, r + idx)
-            self._history.append(state)
-            yield (idx, state)
+        for _ in range(self._size):
+            offset = curr * item_size
+            _, raw_price, raw_amt, _ = struct.unpack_from(fmt, buf, offset)
+            total_vol_price += raw_price * raw_amt
+            total_vol += raw_amt
+            curr = (curr + 1) % capacity
 
-    def extract_proof(self) -> Optional[bytes]:
-        """Aggregate current history stack into a singular verification tag.
+        return (total_vol_price / total_vol / 1e8) if total_vol > 0 else 0.0
 
-        :return: Final combined digest bytes or None if history is uninitialized.
-        """
-        if not self._history:
-            return None
-        acc = self._history[0]
-        for item in self._history[1:]:
-            acc = bytes(a ^ b for a, b in zip(acc, item))
-        return sha256(acc).digest()
+    def __len__(self) -> int:
+        return self._size
