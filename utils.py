@@ -2,31 +2,32 @@ import time
 import functools
 import random
 
-def retry_with_exponential_backoff(max_retries=3, base_delay=1.0, jitter=True):
+def retry_with_backoff(retries=3, backoff_in_seconds=1):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            retries = 0
-            while retries < max_retries:
+            x = 0
+            while True:
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    retries += 1
-                    if retries >= max_retries:
+                    if x == retries:
                         raise e
-                    
-                    delay = base_delay * (2 ** (retries - 1))
-                    if jitter:
-                        delay += random.uniform(0, 0.5 * delay)
-                    
-                    time.sleep(delay)
-            return None
+                    sleep = (backoff_in_seconds * 2 ** x +
+                             random.uniform(0, 1))
+                    time.sleep(sleep)
+                    x += 1
         return wrapper
     return decorator
 
-@retry_with_exponential_backoff(max_retries=5)
-def fetch_crypto_price(ticker):
-    # Simulate network instability for crypto API calls
+@retry_with_backoff(retries=5, backoff_in_seconds=0.5)
+def fetch_price_data(ticker):
+    # Simulate volatile crypto network response
+    import random
     if random.random() < 0.7:
-        raise ConnectionError(f"node synchronization delay for {ticker}")
-    return {"symbol": ticker, "price": 50000.0}
+        raise ConnectionError("Market API node unstable")
+    return {"symbol": ticker, "price": random.uniform(100, 50000)}
+
+if __name__ == '__main__':
+    data = fetch_price_data('BTC')
+    print(f"Successfully fetched: {data}")
