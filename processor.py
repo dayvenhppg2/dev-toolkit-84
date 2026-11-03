@@ -1,44 +1,35 @@
 import hashlib
-import time
-from collections import deque
-from typing import Dict, Generator, List, Tuple, Any
+import decimal
+from typing import Dict, Union, Any
 
+class CryptoDataSanitizer:
+    """Manifest destiny for messy crypto payloads."""
+    def __init__(self, precision: int = 18):
+        self.precision = precision
 
-class CryptoTickProcessor:
-    """Sliding-window VWAP and anomaly stream processor for tick data."""
+    def transmute(self, data: Dict[str, Any]) -> Dict[str, Union[decimal.Decimal, str]]:
+        result = {}
+        for key, value in data.items():
+            try:
+                if isinstance(value, (int, float, str)) and key in ['amount', 'price', 'fee']:
+                    result[key] = decimal.Decimal(str(value)).quantize(
+                        decimal.Decimal(f'1.{0:0{self.precision}d}'), 
+                        rounding=decimal.ROUND_HALF_UP
+                    )
+                else:
+                    result[key] = str(value).strip()
+            except (decimal.InvalidOperation, ValueError):
+                result[key] = 'INVALID_DATA_TYPE'
+        return result
 
-    def __init__(self, window_size: int = 100, entropy_threshold: float = 3.5):
-        self.window_size = window_size
-        self.entropy_threshold = entropy_threshold
-        self._buffer: deque = deque(maxlen=window_size)
-        self._seen_hashes: set = set()
+    def generate_fingerprint(self, data: Dict[str, Any]) -> str:
+        """Deterministic hashing for dirty input frames."""
+        sorted_items = sorted(data.items())
+        payload = ":".join([f"{k}={v}" for k, v in sorted_items])
+        return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
-    def _compute_tick_hash(self, price: float, volume: float, timestamp: float) -> str:
-        payload = f"{price:.8f}:{volume:.8f}:{int(timestamp)}".encode('utf-8')
-        return hashlib.blake2b(payload, digest_size=8).hexdigest()
-
-    def process_stream(self, raw_ticks: List[Dict[str, Any]]) -> Generator[Tuple[float, float, bool], None, None]:
-        """
-        Deduplicates ticks via BLAKE2b fingerprinting and yields (VWAP, TotalVol, IsAnomaly).
-        """
-        for tick in raw_ticks:
-            price = float(tick.get("price", 0.0))
-            volume = float(tick.get("volume", 0.0))
-            ts = float(tick.get("timestamp", time.time()))
-
-            tick_id = self._compute_tick_hash(price, volume, ts)
-            if tick_id in self._seen_hashes:
-                continue
-
-            self._seen_hashes.add(tick_id)
-            if len(self._seen_hashes) > self.window_size * 2:
-                self._seen_hashes.clear()
-
-            self._buffer.append((price, volume))
-            total_vol = sum(v for _, v in self._buffer)
-            vwap = sum(p * v for p, v in self._buffer) / total_vol if total_vol > 0 else price
-
-            avg_vol = total_vol / len(self._buffer)
-            is_anomaly = volume > (avg_vol * self.entropy_threshold) if avg_vol > 0 else False
-
-            yield round(vwap, 8), round(total_vol, 4), is_anomaly
+def normalize_wallet_event(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
+    processor = CryptoDataSanitizer()
+    clean_data = processor.transmute(raw_payload)
+    clean_data['hash'] = processor.generate_fingerprint(clean_data)
+    return clean_data
