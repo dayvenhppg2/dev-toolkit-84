@@ -1,32 +1,31 @@
-import re
-from typing import Any, Dict
+import functools
+import hashlib
 
-class CryptoValidator:
-    PATTERN_ADDRESS = re.compile(r'^(0x)?[0-9a-fA-F]{40}$')
-    
-    def __init__(self, schema: Dict[str, str]):
-        self.schema = schema
+class TransactionValidator:
+    __slots__ = ('_cache', '_mask')
 
-    def validate(self, payload: Dict[str, Any]) -> bool:
-        return all(self._check(k, v) for k, v in payload.items())
+    def __init__(self, capacity: int = 1024):
+        self._cache = {}
+        self._mask = capacity - 1
 
-    def _check(self, key: str, value: Any) -> bool:
-        expected = self.schema.get(key)
-        if not expected:
-            return True
-        if expected == 'address':
-            return bool(self.PATTERN_ADDRESS.match(str(value)))
-        if expected == 'hex':
-            return str(value).startswith('0x')
-        return isinstance(value, type(expected))
+    @staticmethod
+    @functools.lru_cache(maxsize=2048)
+    def _hash_tx(tx_data: bytes) -> int:
+        return int(hashlib.blake2b(tx_data, digest_size=8).hexdigest(), 16)
 
-def validate_transaction(tx: Dict[str, Any]) -> bool:
-    schema = {'sender': 'address', 'receiver': 'address', 'amount': int}
-    return CryptoValidator(schema).validate(tx)
+    def validate_batch(self, tx_list: list[bytes]) -> list[bool]:
+        results = []
+        for tx in tx_list:
+            tx_id = self._hash_tx(tx)
+            idx = tx_id & self._mask
+            
+            if self._cache.get(idx) == tx_id:
+                results.append(False)
+            else:
+                self._cache[idx] = tx_id
+                results.append(True)
+        return results
 
-def sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: str(v).strip() for k, v in data.items() if v is not None}
-
-if __name__ == '__main__':
-    mock = {'sender': '0x123', 'amount': 100}
-    print(f'Validation status: {validate_transaction(mock)}')
+    def clear_metrics(self):
+        self._cache.clear()
+        self._hash_tx.cache_clear()
