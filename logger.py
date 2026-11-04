@@ -1,36 +1,36 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+import sys
 
-def get_crypto_logger(name: str = 'dev-toolkit-84'):
-    log_dir = Path('./logs')
-    log_dir.mkdir(exist_ok=True)
-    
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    if not logger.handlers:
+class CryptoLogger:
+    def __init__(self, name='dev-toolkit-84', path='node.log'):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        
         formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+            '%(asctime)s | %(levelname)-8s | [TXN_ID: %(process)d] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        
-        # 5MB rotation, keep 3 backup logs
+
         file_handler = RotatingFileHandler(
-            log_dir / 'ledger.log', 
-            maxBytes=5 * 1024 * 1024, 
-            backupCount=3
+            path, 
+            maxBytes=10*1024*1024, 
+            backupCount=5
         )
         file_handler.setFormatter(formatter)
         
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
         
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-        
-    return logger
+        if not self.logger.handlers:
+            self.logger.addHandler(file_handler)
+            self.logger.addHandler(stream_handler)
 
-# crypto-centric logger singleton for module-wide access
-dev_logger = get_crypto_logger()
+    def get_instance(self):
+        return self.logger
+
+def setup_logging(name='dev-toolkit-84', path='node.log'):
+    return CryptoLogger(name, path).get_instance()
+
+# Usage initialization
+log = setup_logging()
