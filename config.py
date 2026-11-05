@@ -1,57 +1,34 @@
 import os
 import json
-from typing import Any, Dict, Optional
-
-DEFAULT_CRYPTO_CONFIG: Dict[str, Any] = {
-    "ETH_RPC_URL": "https://cloudflare-eth.com",
-    "CHAIN_ID": 1,
-    "MAX_SLIPPAGE_PCT": 0.5,
-    "DEFAULT_GAS_LIMIT": 21000,
-    "TX_TIMEOUT_SEC": 120,
-    "ENABLE_MEV_PROTECTION": True,
-    "MEMPOOL_NODES": ["wss://eth-mainnet.ws.alchemyapi.io/v2/demo"],
-}
+from typing import Any, Dict
 
 class ConfigLoader:
-    """Dynamic configuration loader with environment overrides and strict fallback."""
+    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
+        self.path = path
+        self.defaults = defaults or {}
+        self.config = self._load()
 
-    def __init__(self, overrides: Optional[Dict[str, Any]] = None):
-        self._user_overrides = overrides or {}
-
-    def __getattr__(self, name: str) -> Any:
-        key = name.upper()
-        if key not in DEFAULT_CRYPTO_CONFIG and key not in self._user_overrides:
-            raise AttributeError(f"Configuration key '{name}' is not registered.")
-
-        val = os.getenv(f"CRYPTO_{key}")
-        if val is not None:
-            return self._cast_type(DEFAULT_CRYPTO_CONFIG.get(key), val)
-
-        if key in self._user_overrides:
-            return self._user_overrides[key]
-
-        return DEFAULT_CRYPTO_CONFIG[key]
-
-    @staticmethod
-    def _cast_type(reference_val: Any, raw_val: str) -> Any:
-        if reference_val is None:
-            return raw_val
-        target_type = type(reference_val)
-        if target_type is bool:
-            return raw_val.lower() in ("true", "1", "yes", "on")
-        if target_type is list:
-            try:
-                return json.loads(raw_val)
-            except json.JSONDecodeError:
-                return [item.strip() for item in raw_val.split(",")]
+    def _load(self) -> Dict[str, Any]:
+        if not os.path.exists(self.path):
+            return self.defaults
         try:
-            return target_type(raw_val)
-        except ValueError:
-            return raw_val
+            with open(self.path, 'r') as f:
+                loaded = json.load(f)
+                return {**self.defaults, **loaded}
+        except (json.JSONDecodeError, IOError):
+            return self.defaults
 
-    def export_snapshot(self) -> Dict[str, Any]:
-        """Export merged configuration snapshot."""
-        return {key.lower(): getattr(self, key) for key in DEFAULT_CRYPTO_CONFIG}
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.config.get(key, default)
 
+    def __getitem__(self, key: str) -> Any:
+        return self.config[key]
 
-config = ConfigLoader()
+    def __repr__(self) -> str:
+        return f"Config(keys={list(self.config.keys())})"
+
+def get_crypto_config() -> ConfigLoader:
+    return ConfigLoader(
+        'settings.json',
+        defaults={'rpc_url': 'http://localhost:8545', 'timeout': 30, 'retries': 3}
+    )
