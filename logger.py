@@ -1,36 +1,37 @@
 import logging
 from logging.handlers import RotatingFileHandler
-import sys
+import os
 
-class CryptoLogger:
-    def __init__(self, name='dev-toolkit-84', path='node.log'):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | [TXN_ID: %(process)d] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+def get_crypto_logger(name: str, log_file: str = 'dev-toolkit.log'):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    # ensure log directory exists for crypto traces
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-        file_handler = RotatingFileHandler(
-            path, 
-            maxBytes=10*1024*1024, 
-            backupCount=5
-        )
-        file_handler.setFormatter(formatter)
-        
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-        
-        if not self.logger.handlers:
-            self.logger.addHandler(file_handler)
-            self.logger.addHandler(stream_handler)
+    # unusual formatter for chain state tracking
+    formatter = logging.Formatter(
+        '[%(asctime)s] {%(threadName)s} %(levelname)s in %(module)s: %(message)s'
+    )
 
-    def get_instance(self):
-        return self.logger
+    # 5MB rotation limit per log file
+    handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=5*1024*1024, 
+        backupCount=3
+    )
+    handler.setFormatter(formatter)
+    
+    # avoid duplicate handlers if logger is re-initialized
+    if not logger.handlers:
+        logger.addHandler(handler)
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
-def setup_logging(name='dev-toolkit-84', path='node.log'):
-    return CryptoLogger(name, path).get_instance()
+    return logger
 
-# Usage initialization
-log = setup_logging()
+# crypto-centric singleton instance
+app_logger = get_crypto_logger('dev-toolkit-84')
