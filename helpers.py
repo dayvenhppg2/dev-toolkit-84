@@ -1,29 +1,51 @@
-import decimal
-from typing import Union, Dict, Any
+import hashlib
+from decimal import Decimal
+from typing import Union, Generator, Any
 
-class CryptoDecimal(decimal.Decimal):
-    """Custom precision handling for crypto asset calculations."""
-    def __new__(cls, value: Union[str, float, int], precision: int = 18):
-        ctx = decimal.Context(prec=64, rounding=decimal.ROUND_HALF_UP)
-        return super().__new__(cls, ctx.create_decimal(str(value)))
+BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
-def normalize_ticker(ticker: str) -> str:
-    """Sanitizes market symbols to internal standard."""
-    clean = "".join(filter(str.isalnum, ticker.upper()))
-    return f"X-{clean}"
 
-def aggregate_orderbook(bids: list, asks: list) -> Dict[str, Any]:
-    """Dynamic calculation of weighted mid-price."""
-    def calc_vol(data): return sum(float(x[1]) for x in data)
-    
-    bid_vol, ask_vol = calc_vol(bids), calc_vol(asks)
-    if not (bid_vol and ask_vol):
-        return {"mid": 0.0, "imbalance": 0.0}
-        
-    w_bid = sum(float(p[0]) * float(p[1]) for p in bids) / bid_vol
-    w_ask = sum(float(p[0]) * float(p[1]) for p in asks) / ask_vol
-    
-    return {
-        "mid": (w_bid + w_ask) / 2,
-        "imbalance": (bid_vol - ask_vol) / (bid_vol + ask_vol)
-    }
+class CryptoPipe:
+    """Fluent pipeline wrapper using bitwise OR operator overloading for stream ops."""
+
+    def __init__(self, value: Any):
+        self.value = value
+
+    def __or__(self, func: Any) -> "CryptoPipe":
+        return CryptoPipe(func(self.value))
+
+    def unwrap(self) -> Any:
+        return self.value
+
+
+def to_satoshis(btc: Union[int, float, str, Decimal]) -> int:
+    """Convert BTC value to Satoshis using exact Decimal precision."""
+    return int(Decimal(str(btc)) * Decimal("100000000"))
+
+
+def to_wei(eth: Union[int, float, str, Decimal]) -> int:
+    """Convert ETH value to Wei using exact Decimal precision."""
+    return int(Decimal(str(eth)) * Decimal("1000000000000000000"))
+
+
+def encode_base58(data: bytes) -> str:
+    """Encode binary byte payload to Base58 checksum string."""
+    num = int.from_bytes(data, byteorder="big")
+    encode_chars = []
+    while num > 0:
+        num, rem = divmod(num, 58)
+        encode_chars.append(BASE58_ALPHABET[rem])
+
+    padding = len(data) - len(data.lstrip(b"\x00"))
+    return (BASE58_ALPHABET[0] * padding) + "".join(reversed(encode_chars))
+
+
+def double_sha256(data: bytes) -> bytes:
+    """Compute double SHA-256 digest of byte buffer."""
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+
+def chunk_stream(data: bytes, chunk_size: int = 32) -> Generator[bytes, None, None]:
+    """Yield slice windows from raw byte sequence."""
+    for offset in range(0, len(data), chunk_size):
+        yield data[offset : offset + chunk_size]
