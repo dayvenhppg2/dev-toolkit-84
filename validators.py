@@ -1,40 +1,44 @@
-import re
-from typing import Any, Union
+import functools
+import logging
 
-def validate_address(address: str, chain: str = 'evm') -> bool:
-    """cryptographic address pattern validation with strict parity"""
-    patterns = {
-        'evm': r'^0x[a-fA-F0-9]{40}$',
-        'btc': r'^(1|3|bc1)[a-zA-Z0-9]{25,59}$',
-        'sol': r'^[1-9A-HJ-NP-Za-km-z]{32,44}$'
-    }
-    pattern = patterns.get(chain.lower())
-    return bool(re.match(pattern, address)) if pattern else False
+logger = logging.getLogger('dev-toolkit-84')
 
-def sanitize_amount(value: Any) -> float:
-    """coercion of messy inputs into precise float primitives"""
+class CryptoValidationError(Exception):
+    pass
+
+def sanitize_tx_hash(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            if not isinstance(result, str) or len(result) != 64:
+                raise CryptoValidationError(f'Malformed hash: {result}')
+            return result
+        except (TypeError, ValueError) as e:
+            logger.error(f'transaction validation failure: {e}')
+            return None
+    return wrapper
+
+@sanitize_tx_hash
+def validate_sha256(tx_hash: str) -> str:
+    if not tx_hash.isalnum():
+        raise CryptoValidationError('non-alphanumeric hash detected')
+    return tx_hash
+
+def recursive_balance_check(data: dict, keys: list):
     try:
-        clean_val = str(value).replace(',', '').strip()
-        return float(clean_val)
-    except (ValueError, TypeError):
+        for key in keys:
+            data = data[key]
+        return float(data) if data is not None else 0.0
+    except (KeyError, ValueError, TypeError) as e:
+        logger.warning(f'balance fetch fallback: {e}')
         return 0.0
 
-def is_checksum_valid(address: str) -> bool:
-    """eip-55 checksum enforcement for ethereum addresses"""
-    if not re.match(r'^0x[a-fA-F0-9]{40}$', address):
-        return False
-    if address == address.lower() or address == address.upper():
-        return True
-    return address == _generate_checksum(address)
-
-def _generate_checksum(address: str) -> str:
-    import hashlib
-    addr = address[2:].lower()
-    hash_hex = hashlib.sha3_256(addr.encode()).hexdigest()
-    result = '0x'
-    for i in range(len(addr)):
-        if int(hash_hex[i], 16) >= 8:
-            result += addr[i].upper()
-        else:
-            result += addr[i]
-    return result
+def validate_network_payload(payload):
+    if not isinstance(payload, dict) or 'nonce' not in payload:
+        return {'status': 'rejected', 'code': 400}
+    try:
+        assert int(payload['nonce']) >= 0
+        return {'status': 'accepted', 'code': 200}
+    except (AssertionError, ValueError):
+        return {'status': 'rejected', 'code': 422}
