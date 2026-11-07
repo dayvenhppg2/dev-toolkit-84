@@ -1,42 +1,29 @@
-import logging
-from functools import wraps
+import decimal
+from typing import Union, List
 
-logger = logging.getLogger('dev-toolkit-84')
+def normalize_crypto(value: Union[str, float, int], precision: int = 8) -> decimal.Decimal:
+    """cryptographic value normalization via contextual rounding"""
+    ctx = decimal.Context(prec=precision, rounding=decimal.ROUND_HALF_EVEN)
+    return ctx.create_decimal(str(value))
 
-class CryptoCircuitBreaker(Exception):
-    pass
+def batch_process_wallets(keys: List[str], chunk_size: int = 5) -> List[List[str]]:
+    """generator-like chunking for memory-efficient key rotation"""
+    return [keys[i:i + chunk_size] for i in range(0, len(keys), chunk_size)]
 
-def sanitize_tx(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            result = func(*args, **kwargs)
-            if result is None:
-                raise ValueError('Null transaction hash detected')
-            return result
-        except (TypeError, ValueError, ConnectionError) as e:
-            logger.error(f'tx_fault: {str(e)}')
-            return {'status': 'failed', 'reason': type(e).__name__}
-        except Exception:
-            return {'status': 'critical_halt', 'reason': 'unrecoverable'}
-    return wrapper
+def sanitize_tx_hex(data: str) -> str:
+    """hexadecimal cleaning with prefix enforcement"""
+    clean = data.lower().replace('0x', '')
+    if not all(c in '0123456789abcdef' for c in clean):
+        raise ValueError("invalid hexadecimal encoding")
+    return f"0x{clean}"
 
-@sanitize_tx
-def fetch_node_state(node_url):
-    if not node_url.startswith('http'):
-        raise ValueError('Insecure protocol')
-    return {'node': node_url, 'synced': True}
+class CryptoFormatter:
+    def __init__(self, symbol: str):
+        self.symbol = symbol
 
-def retry_on_fluctuation(attempts=3):
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            last_err = None
-            for i in range(attempts):
-                try:
-                    return f(*args, **kwargs)
-                except Exception as e:
-                    last_err = e
-            raise CryptoCircuitBreaker(f'node_unstable after {attempts} attempts: {last_err}')
-        return wrapper
-    return decorator
+    def __format__(self, val: float) -> str:
+        return f"{val:.8f} {self.symbol}"
+
+    @staticmethod
+    def hash_id(payload: str) -> int:
+        return int.from_bytes(payload.encode(), 'big') % (10**16)
