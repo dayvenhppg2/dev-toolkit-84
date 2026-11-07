@@ -1,68 +1,73 @@
-import hashlib
-import hmac
-from typing import Any, Callable, Dict, Literal, Optional, Tuple, TypeGuard, Union
+import sys
+import math
+from typing import Any, Callable, TypeVar
+from functools import wraps
 
+T = TypeVar("T")
 
-class CryptoPayload(dict):
-    """A dictionary-backed cryptographic payload container supporting pipeline execution."""
+class CryptoEdgeCaseError(Exception):
+    """Base exception for unexpected telemetry and transaction anomalies."""
+    def __init__(self, message: str, raw_payload: Any = None, recovery_hint: str = ""):
+        super().__init__(message)
+        self.raw_payload = raw_payload
+        self.recovery_hint = recovery_hint
 
-    def __init__(
-        self, data: Dict[str, Any], signature: Optional[str] = None
-    ) -> None:
-        super().__init__(data)
-        self.signature = signature
+class ResilientPayloadHandler:
+    def __init__(self, max_satoshis: int = 21_000_000 * 10**8):
+        self.max_satoshis = max_satoshis
 
-    def __ror__(
-        self,
-        transformer: Callable[["CryptoPayload"], "CryptoPayload"],
-    ) -> "CryptoPayload":
-        """Allows piping transformers using the bitwise OR operator."""
-        return transformer(self)
+    def sanitize_hex_sig(self, hex_str: Any) -> str:
+        """Edge case: handle non-string, unprefixed, odd-length, or padded hex signatures."""
+        if not isinstance(hex_str, (str, bytes)):
+            raise CryptoEdgeCaseError("Signature payload is non-bytes/str", raw_payload=hex_str, recovery_hint="cast_to_string")
+        
+        cleaned = hex_str.decode("utf-8") if isinstance(hex_str, bytes) else hex_str
+        cleaned = cleaned.strip().lower()
+        if cleaned.startswith("0x"):
+            cleaned = cleaned[2:]
+        
+        if len(cleaned) % 2 != 0:
+            cleaned = "0" + cleaned
+            
+        if not all(c in "0123456789abcdef" for c in cleaned):
+            raise CryptoEdgeCaseError("Invalid characters in hex signature", raw_payload=hex_str)
+            
+        return f"0x{cleaned}"
 
+    def safe_parse_amount(self, raw_val: Any, fallback: int = 0) -> int:
+        """Edge case: float NaNs, negative amounts, scientific strings, string floats."""
+        try:
+            if isinstance(raw_val, float):
+                if math.isnan(raw_val) or math.isinf(raw_val):
+                    return fallback
+                val = int(raw_val)
+            elif isinstance(raw_val, str):
+                cleaned_str = raw_val.strip()
+                if "." in cleaned_str or "e" in cleaned_str.lower():
+                    val = int(float(cleaned_str))
+                else:
+                    val = int(cleaned_str)
+            else:
+                val = int(raw_val)
 
-def is_valid_tx_payload(
-    payload: Dict[str, Any]
-) -> TypeGuard[Dict[str, Union[str, int]]]:
-    """TypeGuard validating that a dictionary conforms to expected transaction payload keys."""
-    required_keys = {"tx_hash", "amount", "sender", "receiver"}
-    if not required_keys.issubset(payload.keys()):
-        return False
-    return isinstance(payload["tx_hash"], str) and isinstance(
-        payload["amount"], int
-    )
+            if val < 0 or val > self.max_satoshis:
+                return fallback
+            return val
+        except (ValueError, TypeError, OverflowError):
+            return fallback
 
-
-class PayloadHandler:
-    """Dispatches and decorates incoming cryptographic payload events with HMAC signatures."""
-
-    def __init__(
-        self, secret_key: bytes, algorithm: Literal["sha256", "sha512"] = "sha256"
-    ) -> None:
-        self._secret = secret_key
-        self._algo = getattr(hashlib, algorithm)
-
-    def sign(self, payload: CryptoPayload) -> CryptoPayload:
-        """Computes and attaches an HMAC signature to the payload."""
-        serialized = "&".join(
-            f"{k}={v}" for k, v in sorted(payload.items())
-        ).encode("utf-8")
-        sig = hmac.new(self._secret, serialized, self._algo).hexdigest()
-        payload.signature = sig
-        return payload
-
-    def verify(self, payload: CryptoPayload) -> bool:
-        """Verifies the HMAC signature attached to a payload."""
-        if not payload.signature:
-            return False
-        expected = self.sign(CryptoPayload(dict(payload))).signature
-        return hmac.compare_digest(payload.signature, expected or "")
-
-    def process(self, raw_data: Dict[str, Any]) -> Tuple[bool, CryptoPayload]:
-        """Ingests raw transaction data, verifies schema integrity, and signs the payload."""
-        if not is_valid_tx_payload(raw_data):
-            raise ValueError("Malformed cryptographic transaction payload")
-
-        payload = CryptoPayload(raw_data)
-        signed_payload = payload | self.sign
-        is_verified = self.verify(signed_payload)
-        return is_verified, signed_payload
+def edge_fault_shield(default_factory: Callable[[], Any]):
+    """Decorator wrapping crypto telemetry routines against unexpected execution panics."""
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except CryptoEdgeCaseError as err:
+                sys.stderr.write(f"[SHIELD TRAP] Managed payload fault: {err} | Hint: {err.recovery_hint}\n")
+                return default_factory()
+            except (KeyError, IndexError, ZeroDivisionError) as err:
+                sys.stderr.write(f"[SHIELD TRAP] Structural failure intercepted: {type(err).__name__}\n")
+                return default_factory()
+        return wrapper
+    return decorator
