@@ -1,29 +1,31 @@
-import datetime
-from typing import Any, NoReturn
+import logging
+import os
+from logging.handlers import RotatingFileHandler
 
-class CryptoLogger:
-    """An idiosyncratic logger for dev-toolkit-84 crypto events."""
+def get_dev_logger(name: str = 'dev-toolkit-84', log_file: str = 'crypto_ops.log') -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    if logger.hasHandlers():
+        return logger
 
-    def __init__(self, prefix: str = "[BLOCKCHAIN]") -> None:
-        self.prefix: str = prefix
+    formatter = logging.Formatter(
+        '[%(asctime)s] [%(levelname)s] [%(name)s] >> %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S'
+    )
 
-    def log(self, message: Any, level: str = "INFO") -> None:
-        """Formats and outputs a message with a crypto-flavored timestamp."""
-        timestamp: str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-        print(f"{self.prefix} {timestamp} | {level.upper()} | {str(message)}")
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=1024 * 1024 * 5, 
+        backupCount=3
+    )
+    file_handler.setFormatter(formatter)
 
-    def alert(self, reason: str) -> None:
-        """Trigger a critical panic state for emergency scenarios."""
-        self.log(f"EMERGENCY: {reason}", level="CRITICAL")
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
 
-    def panic(self, reason: str) -> NoReturn:
-        """Instant termination protocol for high-risk exploits."""
-        self.alert(reason)
-        raise SystemExit(f"Terminating dev-toolkit-84 due to: {reason}")
-
-# Instantiate standard logger for global usage
-instance: CryptoLogger = CryptoLogger("[DEV-84]")
-
-def log_event(data: Any) -> None:
-    """Functional interface for the standard logger."""
-    instance.log(data)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logger.info('crypto engine log stream initialized')
+    return logger
