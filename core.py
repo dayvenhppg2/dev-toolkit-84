@@ -1,41 +1,67 @@
-import logging
-from typing import Any, Callable, TypeVar, Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable, Dict, Optional
 
-T = TypeVar('T')
+class CryptoEdgeCaseError(Exception):
+    """Base exception for unexpected blockchain runtime states."""
+    pass
 
-class CryptoCircuitBreaker:
-    def __init__(self, retries: int = 3):
-        self.retries = retries
+class NonStandardAddressError(CryptoEdgeCaseError):
+    pass
 
-    def __call__(self, func: Callable[..., T]) -> Callable[..., Optional[T]]:
-        def wrapper(*args: Any, **kwargs: Any) -> Optional[T]:
-            attempt = 0
-            while attempt < self.retries:
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    attempt += 1
-                    logging.warning(f'Attempt {attempt} failed: {e}')
-                except Exception as e:
-                    logging.critical(f'Fatal crypto error: {e}')
-                    return None
-            return None
+class PrecisionOverflowError(CryptoEdgeCaseError):
+    pass
+
+def guard_edge_cases(fallback_gas_price: int = 20_000_000_000) -> Callable:
+    """Decorator shielding pipeline execution from exotic blockchain data anomalies."""
+    def decorator(func: Callable) -> Callable:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except InvalidOperation:
+                raise PrecisionOverflowError("token calculation exceeded max decimal scale")
+            except ValueError as ve:
+                err_msg = str(ve).lower()
+                if "0x" in err_msg or "address" in err_msg:
+                    raise NonStandardAddressError(f"malformed address structure: {ve}")
+                kwargs["gas_price"] = fallback_gas_price
+                return func(*args, **kwargs)
+            except (KeyError, IndexError):
+                return {"status": "bypassed", "reason": "missing_payload_key", "data": None}
         return wrapper
+    return decorator
 
-@CryptoCircuitBreaker(retries=3)
-def fetch_order_book(symbol: str) -> dict:
-    # Simulate volatile exchange behavior
-    import random
-    if random.random() < 0.3:
-        raise ConnectionError('Exchange node offline')
-    return {'symbol': symbol, 'bid': 50000.0, 'ask': 50001.0}
+class CoreCryptoEngine:
+    def __init__(self, chain_id: int = 1):
+        self.chain_id = chain_id
+        self._nonce_cache: Dict[str, int] = {}
 
-def process_trade(symbol: str):
-    data = fetch_order_book(symbol)
-    if data is None:
-        logging.error(f'Trade processing aborted for {symbol}')
-        return
-    print(f'Order placed for {symbol}: {data}')
+    @guard_edge_cases()
+    def process_raw_tx(self, raw_tx: Dict[str, Any], gas_price: Optional[int] = None) -> Dict[str, Any]:
+        address = str(raw_tx["to"])
+        if not address.startswith("0x") or len(address) != 42:
+            raise ValueError(f"invalid address string: {address}")
 
-if __name__ == '__main__':
-    process_trade('BTC-USD')
+        val_str = str(raw_tx.get("value", "0"))
+        amount = Decimal(val_str) / Decimal("10") ** 18
+        if amount < 0:
+            raise CryptoEdgeCaseError("negative transaction value detected")
+
+        effective_gas = gas_price or raw_tx.get("gas_price")
+        if not effective_gas or int(effective_gas) <= 0:
+            raise ValueError("gas_price must be positive non-zero integer")
+
+        nonce = int(raw_tx["nonce"])
+        sender = raw_tx.get("from", "0x0000000000000000000000000000000000000000")
+
+        if self._nonce_cache.get(sender, -1) >= nonce:
+            raise CryptoEdgeCaseError(f"nonce collision or regression for {sender}")
+        self._nonce_cache[sender] = nonce
+
+        return {
+            "chain_id": self.chain_id,
+            "sender": sender,
+            "recipient": address,
+            "value_eth": str(amount),
+            "gas_price_wei": int(effective_gas),
+            "nonce": nonce,
+        }
