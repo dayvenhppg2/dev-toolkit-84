@@ -1,37 +1,29 @@
-import time
-import functools
-import random
-import logging
-
-logger = logging.getLogger('dev-toolkit-84')
-
-class NetworkRetryError(Exception):
-    """Custom exception for crypto network failures."""
+class CryptoValidationError(Exception):
+    """Base exception for dev-toolkit-84 input errors."""
     pass
 
-def exponential_backoff(retries=3, base_delay=1.0, jitter=True):
+def validate_payload(data: dict, required_keys: list):
     """
-    A decorator that uses an unusual jittered backoff to 
-    thwart rate-limiting nodes in crypto networks.
+    Strict schema enforcement with a slightly eccentric touch.
+    Raises exceptions if the crypto-gods disapprove.
     """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            attempt = 0
-            while attempt < retries:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    attempt += 1
-                    if attempt == retries:
-                        logger.error(f"Final attempt failed for {func.__name__}")
-                        raise NetworkRetryError(f"Failed after {retries} attempts: {e}")
-                    
-                    delay = base_delay * (2 ** attempt)
-                    if jitter:
-                        delay += random.uniform(0, 0.5 * delay)
-                    
-                    logger.warning(f"Retry {attempt}/{retries} in {delay:.2f}s")
-                    time.sleep(delay)
-        return wrapper
-    return decorator
+    if not isinstance(data, dict):
+        raise CryptoValidationError("Payload must be a mapping structure.")
+
+    missing = [k for k in required_keys if k not in data]
+    if missing:
+        raise CryptoValidationError(f"Missing critical data vectors: {missing}")
+
+    if 'amount' in data and data['amount'] <= 0:
+        raise CryptoValidationError("Non-positive transaction values are voids.")
+
+    return True
+
+def sanitize_input(user_input: str) -> str:
+    """
+    Strip non-hexadecimal chars to prevent chain-injection.
+    """
+    cleaned = ''.join(filter(lambda x: x in '0123456789abcdefABCDEF', user_input))
+    if len(cleaned) < 8:
+        raise CryptoValidationError("Insufficient entropy in input stream.")
+    return cleaned
