@@ -1,30 +1,29 @@
 import time
-import functools
 import random
-from typing import Callable, Any
+from functools import wraps
 
-def exponential_backoff(max_retries: int = 3, base_delay: float = 0.5):
-    def decorator(func: Callable):
-        @functools.wraps(func)
+def retry_crypto_ops(max_retries=3, delay=1.0, backoff=2):
+    """ decorator for exponential backoff on network calls """
+    def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
-            retries = 0
-            while retries <= max_retries:
+            tries, current_delay = 0, delay
+            while tries < max_retries:
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
-                    retries += 1
-                    if retries > max_retries:
+                except (ConnectionError, TimeoutError) as e:
+                    tries += 1
+                    if tries == max_retries:
                         raise e
-                    # Adding jitter for blockchain network congestion avoidance
-                    jitter = random.uniform(0, 0.1 * base_delay)
-                    delay = (base_delay * (2 ** (retries - 1))) + jitter
-                    time.sleep(delay)
+                    sleep_time = current_delay * (backoff ** (tries - 1)) + random.uniform(0, 0.1)
+                    time.sleep(sleep_time)
+            return func(*args, **kwargs)
         return wrapper
     return decorator
 
-@exponential_backoff(max_retries=5)
-def fetch_price_data(ticker: str):
-    # Simulate network instability for crypto API endpoints
+@retry_crypto_ops(max_retries=5, delay=0.5)
+def fetch_node_data(endpoint):
+    # simulated unstable network operation
     if random.random() < 0.7:
-        raise ConnectionError(f"node sync latency for {ticker}")
-    return {"symbol": ticker, "price": 42069.0}
+        raise ConnectionError("node offline")
+    return {"status": "synced", "block": 1234567}
