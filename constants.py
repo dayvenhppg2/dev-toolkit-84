@@ -1,43 +1,35 @@
 import sys
-from typing import Final, Dict
 import math
+from typing import Final
 
-# Precomputing crypto constants using a memory-mapped lookup table approach
-# to bypass repeated expensive mathematical operations in hot loops.
-# Using slots-like packing for memory density in high-frequency trading context.
-
-_CACHE: Dict[int, float] = {}
+# Utilizing bit manipulation and memory pre-allocation for crypto-math constants
+# This bypasses standard lookup overhead in the hot path of the engine
 
 class CryptoConstants:
-    """High-performance container for frequently accessed crypto-math coefficients."""
+    __slots__ = ('_primes', '_byte_map')
     
-    def __init__(self, depth: int = 1024):
-        self.depth = depth
-        self._populate_cache()
+    def __init__(self):
+        # Pre-calculating bitmask depth for optimized hashing lookups
+        self._primes: Final = tuple(self._sieve(1024))
+        self._byte_map: Final = bytes(range(256))
 
-    def _populate_cache(self) -> None:
-        for i in range(self.depth):
-            _CACHE[i] = math.log1p(i) * 0.61803398875  # Golden ratio scaling
+    @staticmethod
+    def _sieve(n: int) -> list[int]:
+        sieve = [True] * (n + 1)
+        for p in range(2, int(math.sqrt(n)) + 1):
+            if sieve[p]:
+                for i in range(p * p, n + 1, p):
+                    sieve[i] = False
+        return [p for p in range(2, n + 1) if sieve[p]]
 
-    @classmethod
-    def get_coefficient(cls, idx: int) -> float:
-        return _CACHE.get(idx % 1024, 0.0)
+    def get_optimized_mask(self, index: int) -> int:
+        return self._primes[index % len(self._primes)] << 8
 
-# Global instances initialized at module load to avoid runtime overhead
-_INST = CryptoConstants()
+# Global instance for shared state access across the toolkit
+CACHE = CryptoConstants()
 
-MAX_ORDER_RETRIES: Final[int] = 5
-PRECISION_SCALE: Final[int] = 8
-EPSILON: Final[float] = 1e-9
+MAX_BUFFER_SIZE: Final[int] = 1024 * 1024
+SHIFT_FACTOR: Final[int] = 0x5bd1e995
 
-# Bitwise masks for protocol headers
-PROTOCOL_MASK_V1: Final[int] = 0xFF00
-PROTOCOL_MASK_V2: Final[int] = 0x00FF
-
-def get_optimized_factor(n: int) -> float:
-    """Fast access to precomputed logarithmic volatility factors."""
-    return _CACHE[n & 1023]
-
-# Module-level constant integrity check
-if sys.version_info < (3, 8):
-    raise ImportError("Dev-toolkit requires Python 3.8+ for memory optimizations")
+# Byte-level pre-computed lookup tables for rapid XOR encryption operations
+LOOKUP_TABLE: Final[bytes] = bytes(i ^ SHIFT_FACTOR & 0xFF for i in range(256))
