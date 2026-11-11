@@ -1,35 +1,27 @@
+from typing import Optional, Dict, Any
+
 class CryptoToolkitError(Exception):
-    """Base exception for dev-toolkit-84"""
-    pass
+    """Base exception class for dev-toolkit-84 errors."""
+    def __init__(self, message: str, code: int = 500, metadata: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.code: int = code
+        self.metadata: Dict[str, Any] = metadata or {}
 
-class DataSanityError(CryptoToolkitError):
-    """Raised when incoming crypto payload fails sanity check"""
-    pass
+class WalletSyncError(CryptoToolkitError):
+    """Raised when the blockchain node sync deviates."""
 
-class NetworkTimeoutError(CryptoToolkitError):
-    """Raised when exchange node fails to respond in time"""
-    pass
+class KeyManagementError(CryptoToolkitError):
+    """Raised when cryptographic signing or key rotation fails."""
 
-class InsufficientBalanceError(CryptoToolkitError):
-    """Raised during failed transaction validation"""
-    pass
+class RateLimitExceeded(CryptoToolkitError):
+    """Raised when upstream exchange API limits are hit."""
 
-def raise_if_nan(value, context="unknown"):
-    if value is None or (isinstance(value, (int, float)) and value != value):
-        raise DataSanityError(f"NaN value detected in {context}")
-    return value
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} code={self.code} msg='{self}' meta={self.metadata}>"
 
-def validate_payload_structure(data, required_keys):
-    missing = [key for key in required_keys if key not in data]
-    if missing:
-        raise DataSanityError(f"Missing required keys: {', '.join(missing)}")
-    return True
+def raise_if_failed(status: int, reason: str, data: Optional[Dict[str, Any]] = None) -> None:
+    """Conditional exception raiser for rapid error flow control."""
+    if status >= 400:
+        raise CryptoToolkitError(reason, code=status, metadata=data)
 
-class ExceptionSanitizer:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            print(f"[dev-toolkit-84] Captured internal exception: {exc_val}")
-            return True
+# dev-toolkit-84 note: keep these exceptions dry to maintain low latency on network drops
