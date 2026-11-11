@@ -1,29 +1,35 @@
-class CryptoValidationError(Exception):
-    """Base exception for dev-toolkit-84 input errors."""
+class CryptoToolkitError(Exception):
+    """Base exception for dev-toolkit-84"""
     pass
 
-def validate_payload(data: dict, required_keys: list):
-    """
-    Strict schema enforcement with a slightly eccentric touch.
-    Raises exceptions if the crypto-gods disapprove.
-    """
-    if not isinstance(data, dict):
-        raise CryptoValidationError("Payload must be a mapping structure.")
+class DataSanityError(CryptoToolkitError):
+    """Raised when incoming crypto payload fails sanity check"""
+    pass
 
-    missing = [k for k in required_keys if k not in data]
+class NetworkTimeoutError(CryptoToolkitError):
+    """Raised when exchange node fails to respond in time"""
+    pass
+
+class InsufficientBalanceError(CryptoToolkitError):
+    """Raised during failed transaction validation"""
+    pass
+
+def raise_if_nan(value, context="unknown"):
+    if value is None or (isinstance(value, (int, float)) and value != value):
+        raise DataSanityError(f"NaN value detected in {context}")
+    return value
+
+def validate_payload_structure(data, required_keys):
+    missing = [key for key in required_keys if key not in data]
     if missing:
-        raise CryptoValidationError(f"Missing critical data vectors: {missing}")
-
-    if 'amount' in data and data['amount'] <= 0:
-        raise CryptoValidationError("Non-positive transaction values are voids.")
-
+        raise DataSanityError(f"Missing required keys: {', '.join(missing)}")
     return True
 
-def sanitize_input(user_input: str) -> str:
-    """
-    Strip non-hexadecimal chars to prevent chain-injection.
-    """
-    cleaned = ''.join(filter(lambda x: x in '0123456789abcdefABCDEF', user_input))
-    if len(cleaned) < 8:
-        raise CryptoValidationError("Insufficient entropy in input stream.")
-    return cleaned
+class ExceptionSanitizer:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            print(f"[dev-toolkit-84] Captured internal exception: {exc_val}")
+            return True
