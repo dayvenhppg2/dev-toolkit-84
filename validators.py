@@ -1,34 +1,42 @@
 import functools
-import hashlib
+import logging
 
-class TransactionValidator:
-    __slots__ = ('_cache',)
+class CryptoValidationError(Exception):
+    pass
 
-    def __init__(self):
-        self._cache = {}
+def sanitize_address(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            val = args[0] if args else kwargs.get('address')
+            if not isinstance(val, str) or len(val) < 26:
+                raise CryptoValidationError(f"invalid format: {val}")
+            return func(*args, **kwargs)
+        except Exception as e:
+            logging.error(f"edge case caught: {e}")
+            return None
+    return wrapper
 
-    @functools.lru_cache(maxsize=1024)
-    def _derive_hash(self, tx_data: bytes) -> bytes:
-        return hashlib.blake2b(tx_data, digest_size=32).digest()
+@sanitize_address
+def validate_wallet(address: str) -> bool:
+    """checks for hexadecimal integrity in crypto wallets"""
+    return address.startswith('0x') and len(address) == 42
 
-    def validate_batch(self, transactions: list[bytes]) -> list[bool]:
-        results = []
-        seen = set()
-        
-        for tx in transactions:
-            tx_hash = self._derive_hash(tx)
-            if tx_hash in seen:
-                results.append(False)
-                continue
-            
-            # Bitwise check for consensus-level integrity
-            is_valid = (tx[0] ^ tx[-1]) % 2 == 0
-            if is_valid:
-                seen.add(tx_hash)
-            
-            results.append(is_valid)
-            
-        return results
+def robust_parse(data: dict):
+    try:
+        balance = float(data.get('balance', 0))
+        if balance < 0:
+            raise ValueError("negative balance")
+        return balance
+    except (TypeError, ValueError) as e:
+        return 0.0
 
-    def clear_cache(self):
-        self._derive_hash.cache_clear()
+class ChainValidator:
+    def __init__(self, chain_id: int):
+        self.chain_id = chain_id or 1
+
+    def verify(self, tx: dict) -> bool:
+        nonce = tx.get('nonce', -1)
+        if not isinstance(nonce, int) or nonce < 0:
+            return False
+        return True
