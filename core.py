@@ -1,67 +1,58 @@
-from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Dict, Optional
+import time
+from typing import Dict, List, Union
 
-class CryptoEdgeCaseError(Exception):
-    """Base exception for unexpected blockchain runtime states."""
-    pass
+ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-class NonStandardAddressError(CryptoEdgeCaseError):
-    pass
 
-class PrecisionOverflowError(CryptoEdgeCaseError):
-    pass
+def _base62_encode(num: int) -> str:
+    if num == 0:
+        return ALPHABET[0]
+    arr = []
+    base = len(ALPHABET)
+    while num:
+        num, rem = divmod(num, base)
+        arr.append(ALPHABET[rem])
+    return "".join(reversed(arr))
 
-def guard_edge_cases(fallback_gas_price: int = 20_000_000_000) -> Callable:
-    """Decorator shielding pipeline execution from exotic blockchain data anomalies."""
-    def decorator(func: Callable) -> Callable:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return func(*args, **kwargs)
-            except InvalidOperation:
-                raise PrecisionOverflowError("token calculation exceeded max decimal scale")
-            except ValueError as ve:
-                err_msg = str(ve).lower()
-                if "0x" in err_msg or "address" in err_msg:
-                    raise NonStandardAddressError(f"malformed address structure: {ve}")
-                kwargs["gas_price"] = fallback_gas_price
-                return func(*args, **kwargs)
-            except (KeyError, IndexError):
-                return {"status": "bypassed", "reason": "missing_payload_key", "data": None}
-        return wrapper
-    return decorator
 
-class CoreCryptoEngine:
-    def __init__(self, chain_id: int = 1):
-        self.chain_id = chain_id
-        self._nonce_cache: Dict[str, int] = {}
+def _base62_decode(string: str) -> int:
+    base = len(ALPHABET)
+    num = 0
+    for char in string:
+        num = num * base + ALPHABET.index(char)
+    return num
 
-    @guard_edge_cases()
-    def process_raw_tx(self, raw_tx: Dict[str, Any], gas_price: Optional[int] = None) -> Dict[str, Any]:
-        address = str(raw_tx["to"])
-        if not address.startswith("0x") or len(address) != 42:
-            raise ValueError(f"invalid address string: {address}")
 
-        val_str = str(raw_tx.get("value", "0"))
-        amount = Decimal(val_str) / Decimal("10") ** 18
-        if amount < 0:
-            raise CryptoEdgeCaseError("negative transaction value detected")
+class CompactTickEncoder:
+    """Bit-packing serializer for high-frequency crypto market tick telemetry."""
 
-        effective_gas = gas_price or raw_tx.get("gas_price")
-        if not effective_gas or int(effective_gas) <= 0:
-            raise ValueError("gas_price must be positive non-zero integer")
+    @staticmethod
+    def pack_tick(price: float, volume: float, is_buy: bool, ts: float = None) -> str:
+        ts_ms = int((ts or time.time()) * 1000) & 0xFFFFFFFFFF
+        price_fixed = int(round(price * 1e8)) & 0xFFFFFFFF
+        vol_fixed = int(round(volume * 1e4)) & 0xFFFFFFFF
+        flag = 1 if is_buy else 0
 
-        nonce = int(raw_tx["nonce"])
-        sender = raw_tx.get("from", "0x0000000000000000000000000000000000000000")
+        payload = (ts_ms << 65) | (price_fixed << 33) | (vol_fixed << 1) | flag
+        return _base62_encode(payload)
 
-        if self._nonce_cache.get(sender, -1) >= nonce:
-            raise CryptoEdgeCaseError(f"nonce collision or regression for {sender}")
-        self._nonce_cache[sender] = nonce
+    @staticmethod
+    def unpack_tick(token: str) -> Dict[str, Union[float, bool, int]]:
+        payload = _base62_decode(token)
+        flag = bool(payload & 1)
+        vol_fixed = (payload >> 1) & 0xFFFFFFFF
+        price_fixed = (payload >> 33) & 0xFFFFFFFF
+        ts_ms = (payload >> 65) & 0xFFFFFFFFFF
 
         return {
-            "chain_id": self.chain_id,
-            "sender": sender,
-            "recipient": address,
-            "value_eth": str(amount),
-            "gas_price_wei": int(effective_gas),
-            "nonce": nonce,
+            "timestamp_ms": ts_ms,
+            "price": round(price_fixed / 1e8, 8),
+            "volume": round(vol_fixed / 1e4, 4),
+            "is_buy": flag,
         }
+
+
+def parse_tick_batch(ticks: List[str]) -> List[Dict[str, Union[float, bool, int]]]:
+    """Parses a collection of base62 packed tick signals into sorted market telemetry."""
+    decoded = [CompactTickEncoder.unpack_tick(t) for t in ticks]
+    return sorted(decoded, key=lambda x: x["timestamp_ms"])
