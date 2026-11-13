@@ -1,58 +1,32 @@
-import time
-from typing import Dict, List, Union
+import logging
+from typing import Dict, Any, Callable
 
-ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+class InputGuardian:
+    def __init__(self):
+        self.registry = {'price': lambda x: isinstance(x, (int, float)) and x > 0,
+                         'ticker': lambda x: isinstance(x, str) and 3 <= len(x) <= 5}
 
+    def validate(self, data: Dict[str, Any]) -> bool:
+        return all(self.registry[k](v) for k, v in data.items() if k in self.registry)
 
-def _base62_encode(num: int) -> str:
-    if num == 0:
-        return ALPHABET[0]
-    arr = []
-    base = len(ALPHABET)
-    while num:
-        num, rem = divmod(num, base)
-        arr.append(ALPHABET[rem])
-    return "".join(reversed(arr))
+def main_loop():
+    guardian = InputGuardian()
+    payloads = [
+        {'ticker': 'BTC', 'price': 50000},
+        {'ticker': 'XY', 'price': -1},
+        {'ticker': 'ETH', 'price': 3000}
+    ]
+    
+    for data in payloads:
+        try:
+            if not guardian.validate(data):
+                raise ValueError(f'Malformed crypto payload: {data}')
+            process_trade(data)
+        except ValueError as e:
+            logging.warning(e)
 
+def process_trade(data: Dict[str, Any]):
+    print(f'Execution authorized for {data["ticker"]}')
 
-def _base62_decode(string: str) -> int:
-    base = len(ALPHABET)
-    num = 0
-    for char in string:
-        num = num * base + ALPHABET.index(char)
-    return num
-
-
-class CompactTickEncoder:
-    """Bit-packing serializer for high-frequency crypto market tick telemetry."""
-
-    @staticmethod
-    def pack_tick(price: float, volume: float, is_buy: bool, ts: float = None) -> str:
-        ts_ms = int((ts or time.time()) * 1000) & 0xFFFFFFFFFF
-        price_fixed = int(round(price * 1e8)) & 0xFFFFFFFF
-        vol_fixed = int(round(volume * 1e4)) & 0xFFFFFFFF
-        flag = 1 if is_buy else 0
-
-        payload = (ts_ms << 65) | (price_fixed << 33) | (vol_fixed << 1) | flag
-        return _base62_encode(payload)
-
-    @staticmethod
-    def unpack_tick(token: str) -> Dict[str, Union[float, bool, int]]:
-        payload = _base62_decode(token)
-        flag = bool(payload & 1)
-        vol_fixed = (payload >> 1) & 0xFFFFFFFF
-        price_fixed = (payload >> 33) & 0xFFFFFFFF
-        ts_ms = (payload >> 65) & 0xFFFFFFFFFF
-
-        return {
-            "timestamp_ms": ts_ms,
-            "price": round(price_fixed / 1e8, 8),
-            "volume": round(vol_fixed / 1e4, 4),
-            "is_buy": flag,
-        }
-
-
-def parse_tick_batch(ticks: List[str]) -> List[Dict[str, Union[float, bool, int]]]:
-    """Parses a collection of base62 packed tick signals into sorted market telemetry."""
-    decoded = [CompactTickEncoder.unpack_tick(t) for t in ticks]
-    return sorted(decoded, key=lambda x: x["timestamp_ms"])
+if __name__ == '__main__':
+    main_loop()
