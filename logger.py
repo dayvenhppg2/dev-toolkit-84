@@ -1,32 +1,24 @@
+import datetime
 import logging
-from logging.handlers import RotatingFileHandler
-import os
+from typing import Any, Dict
 
-def get_crypto_logger(name='dev-toolkit-84', log_file='crypto_engine.log'):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
-    )
+class CryptoLogger:
+    """Custom logger tailored for dev-toolkit-84 event tracking."""
 
-    # Unusual approach: shadow-logging for high-frequency crypto ticks
-    file_handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=10*1024*1024, 
-        backupCount=5
-    )
-    file_handler.setFormatter(formatter)
-    
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
+    def __init__(self, service_name: str = "dev-toolkit-84") -> None:
+        self.service: str = service_name
+        self.logger: logging.Logger = logging.getLogger(self.service)
+        self.logger.setLevel(logging.DEBUG)
 
-    if not logger.handlers:
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
+    def log_trade(self, symbol: str, data: Dict[str, Any]) -> None:
+        """Formats and outputs trade-related telemetry with a distinct style."""
+        timestamp: str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        meta_packet: str = f"[{self.service}] | {timestamp} | SYMBOL: {symbol.upper()} | PAYLOAD: {data}"
+        self.logger.info(meta_packet)
 
-    return logger
+    def alert_anomaly(self, code: int, message: str) -> None:
+        """Sends formatted alert strings for cryptographic threshold violations."""
+        self.logger.warning(f"!!! ANOMALY DETECTED: {code} - {message} !!!")
 
-if __name__ == '__main__':
-    log = get_crypto_logger()
-    log.info('System initialized for market volatility monitoring')
+# Instantiate singleton for global crypto tracking
+activity_logger: CryptoLogger = CryptoLogger()
