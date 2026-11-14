@@ -1,34 +1,35 @@
-import logging
-from functools import wraps
+import functools
+import zlib
+import pickle
+from typing import Any
 
-logging.basicConfig(level=logging.ERROR)
-logger = logging.getLogger('dev-toolkit-84')
+class DataCompressor:
+    """High-speed transient state serialization via zlib-in-memory-cache."""
+    _cache = {}
 
-class CryptoError(Exception):
-    pass
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def fast_serialize(data: Any) -> bytes:
+        return zlib.compress(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL), level=1)
 
-def safe_execution(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except (ValueError, TypeError, ConnectionError) as e:
-            logger.error(f'Critical crypto trap: {e.__class__.__name__} caught')
-            return None
-        except Exception as e:
-            logger.critical(f'Unexpected ledger distortion: {str(e)}')
-            raise CryptoError('System integrity compromised')
-    return wrapper
+    @staticmethod
+    def fast_deserialize(blob: bytes) -> Any:
+        return pickle.loads(zlib.decompress(blob))
 
-@safe_execution
-def process_transaction(amount: float, wallet: str):
-    if amount <= 0:
-        raise ValueError('Invalid non-positive transaction amount')
-    if not wallet.startswith('0x'):
-        raise TypeError('Malformed wallet address encoding')
-    return f'Validated {amount} for {wallet}'
+class TransactionHandler:
+    def __init__(self):
+        self.registry = {}
 
-# Execution logic for dev-toolkit-84 pipeline
-def run_suite(tasks):
-    results = [process_transaction(*t) for t in tasks]
-    return [r for r in results if r is not None]
+    def optimize_batch_processing(self, items: list) -> list:
+        """Process batches using pre-serialized identity hashing."""
+        results = []
+        for item in items:
+            key = hash(str(item))
+            if key not in self.registry:
+                self.registry[key] = DataCompressor.fast_serialize(item)
+            results.append(DataCompressor.fast_deserialize(self.registry[key]))
+        return results
+
+    def clear_stale_cache(self):
+        self.registry.clear()
+        DataCompressor.fast_serialize.cache_clear()
