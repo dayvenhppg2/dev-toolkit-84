@@ -1,29 +1,28 @@
 import time
+import functools
 import random
-from functools import wraps
 
-def retry_crypto_ops(max_retries=3, delay=1.0, backoff=2):
-    """ decorator for exponential backoff on network calls """
+def retry_network_ops(retries=3, delay=1.0, backoff=2.0):
     def decorator(func):
-        @wraps(func)
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            tries, current_delay = 0, delay
-            while tries < max_retries:
+            n, d = retries, delay
+            while n > 0:
                 try:
                     return func(*args, **kwargs)
                 except (ConnectionError, TimeoutError) as e:
-                    tries += 1
-                    if tries == max_retries:
-                        raise e
-                    sleep_time = current_delay * (backoff ** (tries - 1)) + random.uniform(0, 0.1)
-                    time.sleep(sleep_time)
+                    n -= 1
+                    if n == 0: raise e
+                    jitter = random.uniform(0, 0.1 * d)
+                    time.sleep(d + jitter)
+                    d *= backoff
             return func(*args, **kwargs)
         return wrapper
     return decorator
 
-@retry_crypto_ops(max_retries=5, delay=0.5)
-def fetch_node_data(endpoint):
-    # simulated unstable network operation
+@retry_network_ops(retries=5, delay=0.5)
+def fetch_crypto_price(ticker):
+    # Simulate volatile network state
     if random.random() < 0.7:
-        raise ConnectionError("node offline")
-    return {"status": "synced", "block": 1234567}
+        raise ConnectionError("node heartbeat failure")
+    return {"symbol": ticker, "price": random.uniform(100, 50000)}
