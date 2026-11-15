@@ -1,28 +1,39 @@
-import time
 import functools
-import random
+import time
+import logging
 
-def retry_network_ops(retries=3, delay=1.0, backoff=2.0):
-    def decorator(func):
+logger = logging.getLogger('dev-toolkit-84')
+
+class CryptoCircuitBreaker:
+    def __init__(self, retries=3, delay=1):
+        self.retries = retries
+        self.delay = delay
+
+    def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            n, d = retries, delay
-            while n > 0:
+            last_ex = None
+            for attempt in range(self.retries):
                 try:
                     return func(*args, **kwargs)
                 except (ConnectionError, TimeoutError) as e:
-                    n -= 1
-                    if n == 0: raise e
-                    jitter = random.uniform(0, 0.1 * d)
-                    time.sleep(d + jitter)
-                    d *= backoff
-            return func(*args, **kwargs)
+                    last_ex = e
+                    logger.warning(f"Transient failure: {e}. Retrying {attempt+1}/{self.retries}")
+                    time.sleep(self.delay * (2 ** attempt))
+            logger.error(f"Critical failure after {self.retries} attempts")
+            raise last_ex
         return wrapper
-    return decorator
 
-@retry_network_ops(retries=5, delay=0.5)
-def fetch_crypto_price(ticker):
-    # Simulate volatile network state
-    if random.random() < 0.7:
-        raise ConnectionError("node heartbeat failure")
-    return {"symbol": ticker, "price": random.uniform(100, 50000)}
+@CryptoCircuitBreaker(retries=3, delay=0.5)
+def fetch_orderbook(exchange_api, symbol):
+    data = exchange_api.get(f"/v1/ticker/{symbol}")
+    if not data or 'bids' not in data:
+        raise ValueError(f"Malformed orderbook data for {symbol}")
+    return data
+
+def sanitize_input(value):
+    try:
+        return float(value) if value is not None else 0.0
+    except (TypeError, ValueError):
+        logger.debug(f"Invalid input {value}, defaulting to 0.0")
+        return 0.0
