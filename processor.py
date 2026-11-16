@@ -1,40 +1,33 @@
-import struct
-from typing import Generator, Tuple
+import functools
+import zlib
+import pickle
 
-class FastTickProcessor:
-    """Zero-allocation binary tick stream processor for crypto feeds."""
-    __slots__ = ('_buffer', '_view', '_fmt', '_struct_len', '_cache')
+def fast_cache(func):
+    cache = {}
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        key = zlib.adler32(pickle.dumps((args, kwargs)))
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+    return wrapper
 
-    def __init__(self, fmt: str = ">dQdQ") -> None:
-        self._fmt = fmt
-        self._struct_len = struct.calcsize(fmt)
-        self._buffer = bytearray()
-        self._view = memoryview(self._buffer)
-        self._cache = {}
+class CryptoProcessor:
+    def __init__(self):
+        self.pipeline = []
 
-    def push(self, chunk: bytes) -> None:
-        self._buffer.extend(chunk)
-        self._view = memoryview(self._buffer)
+    @fast_cache
+    def compute_hash_sequence(self, data: bytes, iterations: int) -> bytes:
+        result = data
+        for i in range(iterations):
+            result = zlib.compress(result + str(i).encode())
+        return result
 
-    def process_stream(self) -> Generator[Tuple[float, float, float, int], None, None]:
-        offset = 0
-        buf_len = len(self._buffer)
-        
-        while offset + self._struct_len <= buf_len:
-            chunk_slice = self._view[offset : offset + self._struct_len]
-            ts, raw_price, amount, seq = struct.unpack(self._fmt, chunk_slice)
-            
-            price_key = raw_price & 0xFFFFFFFF
-            if price_key in self._cache:
-                price = self._cache[price_key]
-            else:
-                price = raw_price / 1e8
-                if len(self._cache) < 1024:
-                    self._cache[price_key] = price
+    def batch_process(self, entries: list) -> list:
+        return [self.compute_hash_sequence(e, 512) for e in entries]
 
-            yield ts, price, amount, seq
-            offset += self._struct_len
-
-        if offset > 0:
-            del self._buffer[:offset]
-            self._view = memoryview(self._buffer)
+if __name__ == '__main__':
+    proc = CryptoProcessor()
+    data_packets = [b'btc_trade_01', b'eth_trade_02']
+    results = proc.batch_process(data_packets)
+    print(f'Processed {len(results)} packets efficiently')
