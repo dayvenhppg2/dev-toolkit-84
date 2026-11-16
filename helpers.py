@@ -1,41 +1,41 @@
-from typing import List, Dict, Union, Callable, Any
-import hashlib
+import functools
+import logging
+import time
+from typing import Callable, Any
 
-def generate_crypto_hash(data: str, salt: str = 'dev-toolkit-84') -> str:
-    """Generates a deterministic SHA-256 hash for crypto identifiers."""
-    hasher = hashlib.sha256()
-    hasher.update((data + salt).encode('utf-8'))
-    return hasher.hexdigest()
+logger = logging.getLogger('dev-toolkit-84')
 
-def normalize_assets(assets: List[Union[str, Dict[str, Any]]]) -> List[str]:
-    """Extracts canonical ticker symbols from mixed input formats."""
-    normalized = []
-    for asset in assets:
-        if isinstance(asset, dict):
-            normalized.append(str(asset.get('ticker', '')).upper())
-        else:
-            normalized.append(str(asset).upper())
-    return [item for item in normalized if item]
+class CryptoCircuitBreaker(Exception):
+    pass
 
-def batch_process(items: List[Any], transform: Callable[[Any], Any]) -> List[Any]:
-    """Applies transformation function to items with error suppression."""
-    results = []
-    for item in items:
-        try:
-            results.append(transform(item))
-        except Exception:
-            continue
-    return results
+def resilient_rpc_call(retries: int = 3, delay: float = 0.5):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            last_ex = None
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    last_ex = e
+                    logger.warning(f'rpc flux on attempt {attempt + 1}: {e}')
+                    time.sleep(delay * (2 ** attempt))
+                except Exception as e:
+                    logger.error(f'critical crypto anomaly: {e}')
+                    raise CryptoCircuitBreaker(f'halted by {type(e).__name__}') from e
+            raise last_ex or RuntimeError('rpc exhaustion')
+        return wrapper
+    return decorator
 
-class RateLimitGovernor:
-    """Governor for enforcing request throughput limits."""
-    def __init__(self, limit: int) -> None:
-        self.limit: int = limit
-        self.counter: int = 0
-
-    def is_permitted(self) -> bool:
-        """Checks if next request passes rate limit gate."""
-        if self.counter < self.limit:
-            self.counter += 1
-            return True
-        return False
+def sanitize_tx_hex(data: str) -> str:
+    try:
+        clean = data.strip().lower()
+        if clean.startswith('0x'):
+            clean = clean[2:]
+        if len(clean) % 2 != 0:
+            clean = '0' + clean
+        bytes.fromhex(clean)
+        return f'0x{clean}'
+    except (ValueError, AttributeError) as e:
+        logger.debug(f'malformed tx data: {e}')
+        return '0x00'
