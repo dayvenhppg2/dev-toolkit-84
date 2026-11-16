@@ -1,42 +1,39 @@
-import re
-from typing import Union, Optional
+import time
+import functools
+import logging
+from typing import Callable, Any
 
-# Crypto address validation suite for dev-toolkit-84
+def retry_crypto_call(retries: int = 3, delay: float = 1.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_ex = None
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    logging.warning(f"Attempt {attempt + 1} failed: {e}")
+                    time.sleep(delay * (2 ** attempt))
+            raise last_ex
+        return wrapper
+    return decorator
 
-def validate_wallet_address(address: str, chain: str = 'eth') -> bool:
-    """
-    validates blockchain addresses using pattern matching logic.
-    :param address: raw wallet string to check
-    :param chain: blockchain identifier, defaults to eth
-    :return: boolean validity status
-    """
-    patterns = {
-        'eth': r'^0x[a-fA-F0-9]{40}$',
-        'btc': r'^(1|3|bc1)[a-zA-HJ-NP-Z0-9]{25,39}$'
-    }
-    pattern = patterns.get(chain.lower())
-    if not pattern:
-        return False
-    return bool(re.match(pattern, address))
+class NetworkCircuitBreaker:
+    def __init__(self, failure_threshold: int = 5):
+        self.failures = 0
+        self.threshold = failure_threshold
+        self.state = "CLOSED"
 
-def sanitize_amount(value: Union[str, float, int]) -> Optional[float]:
-    """
-    normalizes crypto amounts to float representation.
-    :param value: input balance or amount value
-    :return: sanitized float or None if invalid
-    """
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None
-
-class AddressValidator:
-    """
-    stateful validation proxy for dev-toolkit-84 operations
-    """
-    def __init__(self, strict: bool = True) -> None:
-        self.strict = strict
-
-    def check(self, target: str, network: str) -> bool:
-        result = validate_wallet_address(target, network)
-        return result if not self.strict else result
+    def execute(self, func: Callable, *args, **kwargs):
+        if self.state == "OPEN":
+            raise Exception("Circuit is open - network suspended")
+        try:
+            result = func(*args, **kwargs)
+            self.failures = 0
+            return result
+        except Exception as e:
+            self.failures += 1
+            if self.failures >= self.threshold:
+                self.state = "OPEN"
+            raise e
