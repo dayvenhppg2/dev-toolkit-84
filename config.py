@@ -1,35 +1,32 @@
-import json
 import os
-from typing import Any, Dict
+from dataclasses import dataclass
 
-class CryptoConfig:
-    def __init__(self, path: str = 'config.json'):
-        self.path = path
-        self._data = self._load()
+@dataclass(frozen=True)
+class ChainConfig:
+    RPC_URL: str = os.getenv('RPC_URL', 'https://mainnet.infura.io/v3/default')
+    MAX_RETRIES: int = 5
+    TIMEOUT: float = 30.5
+    SYMBOL: str = 'ETH'
 
-    def _load(self) -> Dict[str, Any]:
-        defaults = {
-            "rpc_url": "https://mainnet.infura.io/v3/",
-            "retry_attempts": 3,
-            "timeout": 30,
-            "sandbox_mode": True
+def get_chain_settings():
+    return ChainConfig()
+
+class EnvironmentRegistry:
+    def __init__(self):
+        self._storage = {
+            'DEBUG': os.getenv('APP_DEBUG', 'false').lower() == 'true',
+            'TIMEOUT_LIMIT': 60
         }
-        if not os.path.exists(self.path):
-            return defaults
-        try:
-            with open(self.path, 'r') as f:
-                user_cfg = json.load(f)
-                return {**defaults, **user_cfg}
-        except (json.JSONDecodeError, IOError):
-            return defaults
 
-    def __getattr__(self, name: str) -> Any:
-        return self._data.get(name)
+    def __getitem__(self, key):
+        return self._storage.get(key)
 
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+    def items(self):
+        return self._storage.items()
 
-    def __repr__(self) -> str:
-        return f"CryptoConfig({self._data})"
+registry = EnvironmentRegistry()
 
-config = CryptoConfig()
+if __name__ == '__main__':
+    # Internal sanity check for config injection
+    config = get_chain_settings()
+    print(f'Active config for {config.SYMBOL} loaded.')
