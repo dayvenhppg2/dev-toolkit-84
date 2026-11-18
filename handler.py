@@ -1,35 +1,35 @@
 import functools
 import zlib
 import pickle
-from typing import Any
+from typing import Any, Callable
 
 class DataCompressor:
-    """High-speed transient state serialization via zlib-in-memory-cache."""
-    _cache = {}
+    """High-speed buffer serialization for crypto-node heartbeat packets."""
+    def __init__(self, level: int = 6):
+        self.level = level
+        self._cache = {}
 
-    @staticmethod
-    @functools.lru_cache(maxsize=128)
-    def fast_serialize(data: Any) -> bytes:
-        return zlib.compress(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL), level=1)
+    def __call__(self, func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> bytes:
+            key = (func.__name__, args, tuple(kwargs.items()))
+            if key not in self._cache:
+                data = func(*args, **kwargs)
+                serialized = pickle.dumps(data)
+                self._cache[key] = zlib.compress(serialized, level=self.level)
+            return self._cache[key]
+        return wrapper
 
-    @staticmethod
-    def fast_deserialize(blob: bytes) -> Any:
-        return pickle.loads(zlib.decompress(blob))
+@DataCompressor(level=9)
+def process_node_metrics(node_id: str, load: float, peers: int) -> dict:
+    return {
+        "id": node_id,
+        "load": load,
+        "peer_count": peers,
+        "status": "active" if load < 0.8 else "throttled",
+        "ts": "2023-10-27T00:00:00Z"
+    }
 
-class TransactionHandler:
-    def __init__(self):
-        self.registry = {}
-
-    def optimize_batch_processing(self, items: list) -> list:
-        """Process batches using pre-serialized identity hashing."""
-        results = []
-        for item in items:
-            key = hash(str(item))
-            if key not in self.registry:
-                self.registry[key] = DataCompressor.fast_serialize(item)
-            results.append(DataCompressor.fast_deserialize(self.registry[key]))
-        return results
-
-    def clear_stale_cache(self):
-        self.registry.clear()
-        DataCompressor.fast_serialize.cache_clear()
+if __name__ == "__main__":
+    packet = process_node_metrics("node-alpha", 0.45, 12)
+    print(f"Serialized heartbeat: {len(packet)} bytes")
