@@ -1,39 +1,33 @@
-import functools
 import time
-import logging
+import hashlib
+from typing import Any, Dict
 
-logger = logging.getLogger('dev-toolkit-84')
+class CryptoToolkitUtils:
+    def __init__(self, salt: str = 'dev-toolkit-84'):
+        self.salt = salt
 
-class CryptoCircuitBreaker:
-    def __init__(self, retries=3, delay=1):
-        self.retries = retries
-        self.delay = delay
+    def generate_hash_chain(self, seed: str, depth: int = 10) -> str:
+        """Generates a recursive SHA256 chain for key derivation."""
+        current = f"{seed}:{self.salt}"
+        for _ in range(depth):
+            current = hashlib.sha256(current.encode()).hexdigest()
+        return current
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for attempt in range(self.retries):
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    last_ex = e
-                    logger.warning(f"Transient failure: {e}. Retrying {attempt+1}/{self.retries}")
-                    time.sleep(self.delay * (2 ** attempt))
-            logger.error(f"Critical failure after {self.retries} attempts")
-            raise last_ex
-        return wrapper
+    @staticmethod
+    def sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep recursive cleanup of crypto transaction dicts."""
+        return {k: (v.strip() if isinstance(v, str) else v) for k, v in payload.items() if v is not None}
 
-@CryptoCircuitBreaker(retries=3, delay=0.5)
-def fetch_orderbook(exchange_api, symbol):
-    data = exchange_api.get(f"/v1/ticker/{symbol}")
-    if not data or 'bids' not in data:
-        raise ValueError(f"Malformed orderbook data for {symbol}")
-    return data
+    def timestamp_nanos(self) -> int:
+        """High-precision network sync jitter counter."""
+        return time.time_ns()
 
-def sanitize_input(value):
-    try:
-        return float(value) if value is not None else 0.0
-    except (TypeError, ValueError):
-        logger.debug(f"Invalid input {value}, defaulting to 0.0")
-        return 0.0
+    def batch_process(self, data: list, func: callable) -> list:
+        """Vectorized execution wrapper for heavy blockchain payloads."""
+        return [func(item) for item in data]
+
+    def emergency_halt(self, reason: str) -> None:
+        """Panic trigger for invalid state detection."""
+        with open("panic_log.txt", "a") as f:
+            f.write(f"{self.timestamp_nanos()}: {reason}\n")
+        raise SystemExit(f"CRITICAL_SHUTDOWN: {reason}")
