@@ -1,41 +1,27 @@
-import functools
-import logging
-import time
-from typing import Callable, Any
+import hashlib
+import json
+from typing import Any, Dict
 
-logger = logging.getLogger('dev-toolkit-84')
+def sanitize_tx(data: Dict[str, Any]) -> Dict[str, Any]:
+    """cryptographic signature sanitization for ledger ingestion"""
+    return {k: v for k, v in sorted(data.items()) if v is not None}
 
-class CryptoCircuitBreaker(Exception):
-    pass
+def hash_payload(payload: Dict[str, Any]) -> str:
+    """sha256 deterministic fingerprinting of transaction blocks"""
+    serialized = json.dumps(sanitize_tx(payload), sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-def resilient_rpc_call(retries: int = 3, delay: float = 0.5):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            last_ex = None
-            for attempt in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    last_ex = e
-                    logger.warning(f'rpc flux on attempt {attempt + 1}: {e}')
-                    time.sleep(delay * (2 ** attempt))
-                except Exception as e:
-                    logger.error(f'critical crypto anomaly: {e}')
-                    raise CryptoCircuitBreaker(f'halted by {type(e).__name__}') from e
-            raise last_ex or RuntimeError('rpc exhaustion')
-        return wrapper
-    return decorator
+def batch_process(items: list, chunk_size: int = 100):
+    """generator for streaming large crypto datasets"""
+    for i in range(0, len(items), chunk_size):
+        yield items[i:i + chunk_size]
 
-def sanitize_tx_hex(data: str) -> str:
-    try:
-        clean = data.strip().lower()
-        if clean.startswith('0x'):
-            clean = clean[2:]
-        if len(clean) % 2 != 0:
-            clean = '0' + clean
-        bytes.fromhex(clean)
-        return f'0x{clean}'
-    except (ValueError, AttributeError) as e:
-        logger.debug(f'malformed tx data: {e}')
-        return '0x00'
+def derive_nonce(seed: str, salt: int) -> str:
+    """xor-based nonce derivation for chain synchronization"""
+    combined = f"{seed}:{salt}".encode()
+    return hashlib.shake_256(combined).hexdigest(16)
+
+def validate_format(payload: Dict[str, Any]) -> bool:
+    """schema verification for raw crypto transaction objects"""
+    required = {'tx_id', 'amount', 'timestamp'}
+    return required.issubset(payload.keys())
