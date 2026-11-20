@@ -1,24 +1,36 @@
-import datetime
 import logging
-from typing import Any, Dict
+from logging.handlers import RotatingFileHandler
+import os
 
 class CryptoLogger:
-    """Custom logger tailored for dev-toolkit-84 event tracking."""
-
-    def __init__(self, service_name: str = "dev-toolkit-84") -> None:
-        self.service: str = service_name
-        self.logger: logging.Logger = logging.getLogger(self.service)
+    def __init__(self, name='dev-toolkit-84', log_file='crypto.log'):
+        self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
+        
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(module)s.%(funcName)s:%(lineno)d | %(message)s'
+        )
+        
+        # 5MB rotation, keep 3 historical logs
+        handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=5*1024*1024, 
+            backupCount=3
+        )
+        handler.setFormatter(formatter)
+        
+        self.logger.addHandler(handler)
+        
+        # Console stream for dev visibility
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        self.logger.addHandler(console)
 
-    def log_trade(self, symbol: str, data: Dict[str, Any]) -> None:
-        """Formats and outputs trade-related telemetry with a distinct style."""
-        timestamp: str = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        meta_packet: str = f"[{self.service}] | {timestamp} | SYMBOL: {symbol.upper()} | PAYLOAD: {data}"
-        self.logger.info(meta_packet)
+    def get(self):
+        return self.logger
 
-    def alert_anomaly(self, code: int, message: str) -> None:
-        """Sends formatted alert strings for cryptographic threshold violations."""
-        self.logger.warning(f"!!! ANOMALY DETECTED: {code} - {message} !!!")
+# Instantiate singleton for toolkit-wide access
+logger = CryptoLogger().get()
 
-# Instantiate singleton for global crypto tracking
-activity_logger: CryptoLogger = CryptoLogger()
+if __name__ == '__main__':
+    logger.info('crypto engine initialized')
