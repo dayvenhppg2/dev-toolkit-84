@@ -1,27 +1,29 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 
 class CryptoToolkitError(Exception):
-    """Base exception class for dev-toolkit-84 errors."""
-    def __init__(self, message: str, code: int = 500, metadata: Optional[Dict[str, Any]] = None) -> None:
-        super().__init__(message)
-        self.code: int = code
-        self.metadata: Dict[str, Any] = metadata or {}
-
-class WalletSyncError(CryptoToolkitError):
-    """Raised when the blockchain node sync deviates."""
-
-class KeyManagementError(CryptoToolkitError):
-    """Raised when cryptographic signing or key rotation fails."""
+    """Base exception for the dev-toolkit-84 ecosystem."""
+    def __init__(self, message: str, code: Optional[int] = None) -> None:
+        super().__init__(f"[Code {code}] {message}" if code else message)
+        self.code = code
 
 class RateLimitExceeded(CryptoToolkitError):
-    """Raised when upstream exchange API limits are hit."""
+    """Raised when the exchange API hits throttle thresholds."""
+    pass
 
-    def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} code={self.code} msg='{self}' meta={self.metadata}>"
+class WalletSyncError(CryptoToolkitError):
+    """Raised when node synchronization fails unexpectedly."""
+    pass
 
-def raise_if_failed(status: int, reason: str, data: Optional[Dict[str, Any]] = None) -> None:
-    """Conditional exception raiser for rapid error flow control."""
-    if status >= 400:
-        raise CryptoToolkitError(reason, code=status, metadata=data)
+class InvalidPayloadError(CryptoToolkitError):
+    """Raised when crypto message formats are malformed."""
+    def __init__(self, detail: Any) -> None:
+        super().__init__(f"Malformed payload structure: {str(detail)}", code=400)
 
-# dev-toolkit-84 note: keep these exceptions dry to maintain low latency on network drops
+class SecretKeyVaultError(CryptoToolkitError):
+    """Raised when cryptographic keys are missing or invalid."""
+    pass
+
+def raise_if_none(value: Any, msg: str) -> None:
+    """Guard clause for critical crypto operations."""
+    if value is None:
+        raise CryptoToolkitError(f"Requirement check failed: {msg}", code=500)
