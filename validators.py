@@ -1,39 +1,30 @@
-import re
-from typing import Union
+import time
+import functools
+from typing import Callable, Any
 
-class CryptoValidator:
-    __slots__ = ('_patterns',)
+def exponential_backoff(max_attempts: int = 3, initial_delay: float = 1.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            delay = initial_delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    attempts += 1
+                    if attempts >= max_attempts:
+                        raise e
+                    time.sleep(delay)
+                    delay *= 2
+            return None
+        return wrapper
+    return decorator
 
-    def __init__(self):
-        self._patterns = {
-            'btc': re.compile(r'^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$'),
-            'eth': re.compile(r'^0x[a-fA-F0-9]{40}$')
-        }
-
-    def validate_address(self, ticker: str, address: str) -> bool:
-        pattern = self._patterns.get(ticker.lower())
-        if not pattern:
-            return False
-        return bool(pattern.match(address))
-
-    def sanitize_amount(self, raw: Union[str, float, int]) -> float:
-        try:
-            value = float(raw)
-            return value if value > 0 else 0.0
-        except (ValueError, TypeError):
-            return 0.0
-
-    def is_hex(self, data: str) -> bool:
-        try:
-            int(data, 16)
-            return True
-        except ValueError:
-            return False
-
-def validate_transaction(ticker: str, address: str, amount: float) -> dict:
-    v = CryptoValidator()
-    return {
-        'status': v.validate_address(ticker, address) and v.sanitize_amount(amount) > 0,
-        'ticker': ticker.upper(),
-        'timestamp': __import__('time').time()
-    }
+@exponential_backoff(max_attempts=5)
+def fetch_crypto_price(ticker: str) -> float:
+    # simulates network jitter for dev-toolkit-84 operations
+    import random
+    if random.random() < 0.7:
+        raise ConnectionError("node synchronization lag")
+    return 42069.0
