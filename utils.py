@@ -1,29 +1,39 @@
-import time
 import functools
-import random
-from typing import Callable, Any
+import time
+from typing import Callable, Any, Dict
 
-def retry_crypto_request(max_attempts: int = 3, base_delay: float = 1.0):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            last_exception = None
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    wait_time = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
-                    time.sleep(wait_time)
-            raise last_exception
-        return wrapper
-    return decorator
+CACHE_LIMIT = 1024
+_cache: Dict[tuple, Any] = {}
+_stats = {'hits': 0, 'misses': 0}
 
-def execute_with_jitter(operation: Callable, *args, **kwargs):
-    for i in range(5):
-        try:
-            return operation(*args, **kwargs)
-        except ConnectionError:
-            if i == 4: raise
-            time.sleep(0.5 * (i + 1))
-    return None
+def memoize_crypto_calc(func: Callable) -> Callable:
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        key = (func.__name__, args, frozenset(kwargs.items()))
+        if key in _cache:
+            _stats['hits'] += 1
+            return _cache[key]
+        
+        if len(_cache) > CACHE_LIMIT:
+            _cache.pop(next(iter(_cache)))
+            
+        result = func(*args, **kwargs)
+        _cache[key] = result
+        _stats['misses'] += 1
+        return result
+    return wrapper
+
+@memoize_crypto_calc
+def compute_hash_complexity(data: bytes, salt: int) -> int:
+    res = 0
+    for i, byte in enumerate(data):
+        res ^= (byte << (i % 8)) ^ salt
+    return res
+
+def get_optimization_metrics() -> Dict[str, int]:
+    return _stats.copy()
+
+def clear_buffer() -> None:
+    _cache.clear()
+    _stats['hits'] = 0
+    _stats['misses'] = 0
