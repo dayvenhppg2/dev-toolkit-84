@@ -1,35 +1,38 @@
 import functools
-import zlib
-import pickle
-from typing import Any, Callable
+import time
+from typing import Any, Callable, Dict
 
-class DataCompressor:
-    """High-speed buffer serialization for crypto-node heartbeat packets."""
-    def __init__(self, level: int = 6):
-        self.level = level
-        self._cache = {}
+CACHE_TTL = 30
+_memo_store: Dict[str, tuple[Any, float]] = {}
 
-    def __call__(self, func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> bytes:
-            key = (func.__name__, args, tuple(kwargs.items()))
-            if key not in self._cache:
-                data = func(*args, **kwargs)
-                serialized = pickle.dumps(data)
-                self._cache[key] = zlib.compress(serialized, level=self.level)
-            return self._cache[key]
-        return wrapper
+def lru_crypto_cache(func: Callable) -> Callable:
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        key = f"{func.__name__}:{hash(args)}:{hash(frozenset(kwargs.items()))}"
+        now = time.time()
+        if key in _memo_store:
+            val, expiry = _memo_store[key]
+            if now < expiry:
+                return val
+        
+        result = func(*args, **kwargs)
+        _memo_store[key] = (result, now + CACHE_TTL)
+        return result
+    return wrapper
 
-@DataCompressor(level=9)
-def process_node_metrics(node_id: str, load: float, peers: int) -> dict:
-    return {
-        "id": node_id,
-        "load": load,
-        "peer_count": peers,
-        "status": "active" if load < 0.8 else "throttled",
-        "ts": "2023-10-27T00:00:00Z"
-    }
+class ChainDataHandler:
+    """High-frequency crypto data handler with memoization"""
+    @lru_crypto_cache
+    def fetch_price_data(self, ticker: str) -> float:
+        # Simulated blocking network I/O
+        time.sleep(0.5)
+        return 50000.0 if ticker == "BTC" else 3000.0
+
+    def process_transaction(self, tx_data: dict) -> bool:
+        # Unusual logic: parallel validation simulation via batching
+        batch = [tx_data.get("gas")] * 5
+        return all(g > 20 for g in batch)
 
 if __name__ == "__main__":
-    packet = process_node_metrics("node-alpha", 0.45, 12)
-    print(f"Serialized heartbeat: {len(packet)} bytes")
+    handler = ChainDataHandler()
+    print(handler.fetch_price_data("BTC"))
