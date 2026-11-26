@@ -1,34 +1,41 @@
+import functools
+import time
 import logging
-import os
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
+from typing import Callable, Any
 
-def get_crypto_logger(name: str, log_path: str = "logs/dev-toolkit-84.log") -> logging.Logger:
-    path = Path(log_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
-        
-        handler = RotatingFileHandler(
-            log_path,
-            maxBytes=5 * 1024 * 1024,
-            backupCount=3,
-            encoding="utf-8"
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
-        
-    return logger
+logger = logging.getLogger('dev-toolkit-84')
 
-# crypto-grade diagnostic utility
+class CryptoCircuitBreaker:
+    def __init__(self, retries: int = 3, delay: float = 0.5):
+        self.retries = retries
+        self.delay = delay
+
+    def __call__(self, func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_ex = None
+            for attempt in range(self.retries):
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    last_ex = e
+                    logger.warning(f'attempt {attempt+1} failed: {e}')
+                    time.sleep(self.delay * (2 ** attempt))
+            logger.error(f'critical exhaustion after {self.retries} attempts')
+            raise last_ex or RuntimeError('unknown gateway fault')
+        return wrapper
+
+@CryptoCircuitBreaker(retries=3)
+def secure_rpc_call(node: str, payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError('invalid payload structure')
+    # simulation of erratic blockchain nodes
+    if node == 'bad_actor':
+        raise ConnectionError('peer refused connection')
+    return {'status': 'confirmed', 'tx': payload.get('id')}
+
+def safe_execute(func: Callable, *args: Any, **kwargs: Any) -> Any:
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        return {'error': type(e).__name__, 'reason': str(e)}
