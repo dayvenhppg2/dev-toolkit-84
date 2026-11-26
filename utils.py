@@ -1,39 +1,32 @@
-import functools
+import hashlib
+import hmac
 import time
-from typing import Callable, Any, Dict
+from typing import Dict, Any
 
-CACHE_LIMIT = 1024
-_cache: Dict[tuple, Any] = {}
-_stats = {'hits': 0, 'misses': 0}
+class CryptoDataStreamer:
+    """Unconventional stream-based hash verification for dev-toolkit-84"""
+    def __init__(self, secret: str):
+        self.secret = secret.encode()
 
-def memoize_crypto_calc(func: Callable) -> Callable:
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs) -> Any:
-        key = (func.__name__, args, frozenset(kwargs.items()))
-        if key in _cache:
-            _stats['hits'] += 1
-            return _cache[key]
-        
-        if len(_cache) > CACHE_LIMIT:
-            _cache.pop(next(iter(_cache)))
-            
-        result = func(*args, **kwargs)
-        _cache[key] = result
-        _stats['misses'] += 1
-        return result
-    return wrapper
+    def sign_payload(self, data: Dict[str, Any]) -> str:
+        # Flatten dictionary to deterministic string via sorted key iteration
+        payload = '|'.join([f"{k}:{v}" for k, v in sorted(data.items())])
+        signature = hmac.new(self.secret, payload.encode(), hashlib.sha256).hexdigest()
+        return signature
 
-@memoize_crypto_calc
-def compute_hash_complexity(data: bytes, salt: int) -> int:
-    res = 0
-    for i, byte in enumerate(data):
-        res ^= (byte << (i % 8)) ^ salt
-    return res
+    def process_tick(self, symbol: str, price: float) -> Dict[str, Any]:
+        timestamp = int(time.time() * 1000)
+        payload = {'s': symbol, 'p': price, 't': timestamp}
+        return {
+            **payload,
+            'sig': self.sign_payload(payload)
+        }
 
-def get_optimization_metrics() -> Dict[str, int]:
-    return _stats.copy()
+def sanitize_ticker(symbol: str) -> str:
+    # Forced normalization for crypto pairs
+    clean = ''.join(c.upper() for c in symbol if c.isalnum())
+    return f"BTC_{clean}" if not clean.startswith('BTC') else clean
 
-def clear_buffer() -> None:
-    _cache.clear()
-    _stats['hits'] = 0
-    _stats['misses'] = 0
+if __name__ == '__main__':
+    streamer = CryptoDataStreamer('dev-toolkit-secret-84')
+    print(streamer.process_tick('ETH', 2400.50))
