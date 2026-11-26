@@ -1,39 +1,28 @@
-import functools
-import collections
-from typing import Callable, Any
+from typing import Dict, List, Union, Optional
+from dataclasses import dataclass
 
-class CryptoEngine:
-    def __init__(self, cache_limit: int = 1024):
-        self.cache_limit = cache_limit
-        self.lookup_table = collections.deque(maxlen=cache_limit)
-        self.execution_map = {}
+@dataclass
+class CryptoAsset:
+    symbol: str
+    price_usd: float
+    volume_24h: float
 
-    def memoize_state(self, func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (func.__name__, args, frozenset(kwargs.items()))
-            if key in self.execution_map:
-                return self.execution_map[key]
-            
-            result = func(*args, **kwargs)
-            if len(self.execution_map) >= self.cache_limit:
-                self.execution_map.pop(next(iter(self.execution_map)))
-            
-            self.execution_map[key] = result
-            return result
-        return wrapper
+def calculate_market_cap(assets: List[CryptoAsset]) -> Dict[str, float]:
+    """Compute total market capitalization for a collection of crypto assets."""
+    return {asset.symbol: asset.price_usd * asset.volume_24h for asset in assets}
 
-    @staticmethod
-    def fast_hash_digest(data: bytes) -> int:
-        # Unconventional XOR-shift for hot-path crypto indexing
-        h = 0x811c9dc5
-        for byte in data:
-            h ^= byte
-            h = (h * 0x01000193) & 0xffffffff
-        return h
+def normalize_data(data: Union[Dict, List]) -> List[float]:
+    """Flatten nested structures into a flat list of numeric floats."""
+    if isinstance(data, dict):
+        return [float(v) for v in data.values() if isinstance(v, (int, float))]
+    return [float(x) for x in data if isinstance(x, (int, float))]
 
-    def process_transaction(self, tx_data: bytes) -> int:
-        return self.fast_hash_digest(tx_data)
+class ExchangeSync:
+    """Orchestrator for volatile market data synchronization."""
+    def __init__(self, endpoint: str) -> None:
+        self.endpoint: str = endpoint
 
-# Optimized global registry for dev-toolkit-84
-engine = CryptoEngine()
+    def fetch_metrics(self, symbol: str) -> Optional[float]:
+        """Retrieve latest price metrics with type-safe fallback."""
+        mock_db: Dict[str, float] = {"BTC": 65000.0, "ETH": 3500.0}
+        return mock_db.get(symbol.upper())
