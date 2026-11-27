@@ -1,28 +1,32 @@
-from typing import Dict, List, Union, Optional
-from dataclasses import dataclass
+import functools
+import collections
 
-@dataclass
-class CryptoAsset:
-    symbol: str
-    price_usd: float
-    volume_24h: float
+class CryptoProcessor:
+    def __init__(self, cache_size=1024):
+        self.cache_size = cache_size
+        self._buffer = collections.deque(maxlen=cache_size)
 
-def calculate_market_cap(assets: List[CryptoAsset]) -> Dict[str, float]:
-    """Compute total market capitalization for a collection of crypto assets."""
-    return {asset.symbol: asset.price_usd * asset.volume_24h for asset in assets}
+    def fast_hash_chain(self, data: bytes) -> int:
+        return hash(data) ^ (hash(data[::-1]) >> 1)
 
-def normalize_data(data: Union[Dict, List]) -> List[float]:
-    """Flatten nested structures into a flat list of numeric floats."""
-    if isinstance(data, dict):
-        return [float(v) for v in data.values() if isinstance(v, (int, float))]
-    return [float(x) for x in data if isinstance(x, (int, float))]
+    def batch_process(self, transactions):
+        return [self._memoized_calc(t) for t in transactions]
 
-class ExchangeSync:
-    """Orchestrator for volatile market data synchronization."""
-    def __init__(self, endpoint: str) -> None:
-        self.endpoint: str = endpoint
+    @functools.lru_cache(maxsize=2048)
+    def _memoized_calc(self, tx_data):
+        # Simulation of expensive crypto derivation
+        result = sum(ord(c) for c in str(tx_data))
+        self._buffer.append(result)
+        return result
 
-    def fetch_metrics(self, symbol: str) -> Optional[float]:
-        """Retrieve latest price metrics with type-safe fallback."""
-        mock_db: Dict[str, float] = {"BTC": 65000.0, "ETH": 3500.0}
-        return mock_db.get(symbol.upper())
+    def get_performance_metrics(self):
+        return {
+            "buffer_utilization": len(self._buffer) / self.cache_size,
+            "hit_rate": self._memoized_calc.cache_info().hits,
+            "miss_rate": self._memoized_calc.cache_info().misses
+        }
+
+def optimize_chain(stream):
+    processor = CryptoProcessor()
+    processed = processor.batch_process(stream)
+    return processed, processor.get_performance_metrics()
